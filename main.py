@@ -1,60 +1,53 @@
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
+import logging
 from pprint import pp  # pyright: ignore[reportUnusedImport]
 import sys
-from time import perf_counter
 import tkinter as tk
-from typing import Never, final, override
+from typing import final, override
+
+logger = logging.getLogger()
+_old_debug = logger.debug
+def _new_debug(*inputs: object):
+    inputs = list(inputs)  # pyright: ignore[reportAssignmentType]
+    inputs[0] = inputs[0][:-1]  # pyright: ignore[reportIndexIssue]
+    _old_debug(" ".join(str(x) for x in inputs))
+logger.debug = _new_debug  # pyright: ignore[reportAttributeAccessIssue]
 
 class Debug:
     @override
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({", ".join(f"{k}={v}" for k, v in self.__dict__.items())})"  # pyright: ignore[reportAny]
-debug_depth = 0
-def debug[T, **P](callable: Callable[P, T]) -> Callable[P, T]:
-    def inner(*args: P.args, **kwargs: P.kwargs) -> T:
-        global debug_depth
-        print(f"{"  "*debug_depth}Calling {repr(callable).split(" at")[0][10:]} with ({", ".join(str(x) for x in args)}) {kwargs=}")
-        debug_depth += 1
-        result = callable(*args, **kwargs)
-        debug_depth -= 1
-        print(f"{"  "*debug_depth}{result=}")
-        return result
-    return inner
 
 @dataclass
 class Spanned:
     start: int
     end: int
+
     @property
     def length(self) -> int:
         return self.end - self.start
-    
-    @override
-    def __str__(self) -> str:
-        return f"{self.__class__.__name__}-{self.start}-{self.end}"
 
+indent = 0
 @dataclass
 class RegexLiteral(Spanned):
     char: str
-    # @debug
-    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
-        if index < len(input) and input[index] == self.char:
-            yield index + 1
 
-@dataclass
-class CharSet(Spanned):
-    chars: str
-    # @debug
-    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
-        if index < len(input) and input[index] in self.chars:
-            yield index + 1
+    def matches(self, input: str, index: int) -> list[int]:
+        global indent
+        if index < len(input) and input[index] == self.char:
+            logger.debug("| "* indent, self, index, input[index], index + 1)
+            return [index + 1]
+        logger.debug("| "* indent, self, index, "BACKTRACK")
+        return []
 
 class TokenGroupStart(Debug): ...
 class TokenGroupEnd(Debug): ...
 class TokenAltSep(Debug): ...
 class TokenPlus(Debug): ...
-type Token = TokenGroupStart | TokenGroupEnd | TokenAltSep | RegexLiteral | TokenPlus | RegexError | CharSet
+
+type Token = TokenGroupStart | TokenGroupEnd | TokenAltSep | RegexLiteral | TokenPlus
+
 def lexer(input: str) -> Sequence[Token]:
     index = 0
     length = len(input)
@@ -69,17 +62,6 @@ def lexer(input: str) -> Sequence[Token]:
             output.append(TokenAltSep())
         elif char == "+":
             output.append(TokenPlus())
-        elif char == "[":
-            starting_index = index
-            index += 1
-            while index < length:
-                if input[index] == "]":
-                    break
-                index += 1
-            else:
-                output.append(RegexError(starting_index, index, CharSet(starting_index, index, input[starting_index+1:]), "Unclosed charset"))
-                break
-            output.append(CharSet(starting_index, index+1, input[starting_index+1:index]))
         else:
             output.append(RegexLiteral(index, index + 1, input[index]))
         index += 1
@@ -88,96 +70,127 @@ def lexer(input: str) -> Sequence[Token]:
 @dataclass
 class Alt(Spanned):
     concats: Sequence[Concat]
-    # @debug
-    def matches(self, input: str, index: int, starting_concat: int = 0) -> tuple[bool, int, int]:
-        for concat_index in range(starting_concat, len(self.concats)):
-            matches, new_index = self.concats[concat_index].matches(input, index)
-            if matches:
-                return True, new_index, concat_index
-        return False, index, 0
+
+    def matches(self, input: str, index: int) -> list[int]:
+        global indent
+        logger.debug("| "* indent, "Alt", self.start, self.end, index)
+        indent += 1
+        result = [inner_index for concat in self.concats for inner_index in concat.matches(input, index)]
+        indent -= 1
+        logger.debug("| "* indent, "->Alt", self.start, self.end, result)
+        return result
+
 @dataclass
 class Concat(Spanned):
     regexes: Sequence[RegexItem]
-    def regexes_to_with_info(self) -> list[tuple[RegexLiteral | CharSet, int | None] | tuple[Group | Repeat, int | None, int | None] | tuple[RegexError]]:
-        output: list[tuple[RegexLiteral | CharSet, int | None] | tuple[Group | Repeat, int | None, int | None] | tuple[RegexError]] = []
-        for regex in self.regexes:
-            match regex:
-                case RegexLiteral() | CharSet():
-                    output.append((regex, None))
-                case Group() | Repeat():
-                    output.append((regex, None, None))
-                case RegexError():
-                    output.append((regex,))
-        return output
-    # @debug
-    def matches(self, input: str, index: int) -> tuple[bool, int]:
-        regex_with_info = self.regexes_to_with_info()
-        regex_index = 0
-        length = len(regex_with_info)
-        while regex_index < length:
-            # pp(regex_with_info)
-            # print(index, regex_index)
-            if regex_index < 0:
-                return False, index
-            backtracking_info = regex_with_info[regex_index]
-            # print(backtracking_info[0].__class__.__name__, backtracking_info[0].start, backtracking_info[0].end, backtracking_info[1:])
-            match backtracking_info:
-                case (RegexLiteral() | CharSet() as regex, backtracking_index):
-                    matches, new_index = regex.matches(input, index if backtracking_index is None else backtracking_index)
-                    if matches:
-                        regex_with_info[regex_index] = (regex, index)
-                        index = new_index
-                        regex_index += 1
-                    else:
-                        regex_with_info[regex_index] = (regex, None)
-                        if backtracking_index is not None:
-                            index = backtracking_index
-                        regex_index -= 1
-                case (Group() | Repeat() as regex, backtracking_index, limit):
-                    if isinstance(regex, Group) and limit is None:
-                        limit = 0
-                    # print(regex_index, index if backtracking_index is None else backtracking_index)
-                    matches, new_index, new_limit = regex.matches(input, index if backtracking_index is None else backtracking_index, limit)  # pyright: ignore[reportArgumentType]
-                    # print(matches, new_index, new_limit)
-                    if matches:
-                        regex_with_info[regex_index] = (regex, index, new_limit - 1)
-                        index = new_index
-                        regex_index += 1
-                    else:
-                        regex_with_info[regex_index] = (regex, None, None)
-                        if backtracking_index is not None:
-                            index = backtracking_index
-                        regex_index -= 1
-                case (RegexError(),):
-                    regex_index -= 1
-        return True, index
+
+    def matches(self, input: str, index: int) -> list[int]:
+        global indent
+        logger.debug("| "* indent, "Con", self.start, self.end, index)
+        indent += 1
+        if not self.regexes:
+            return list[int]()
+
+        length = len(self.regexes)
+        res = self.regexes[0].matches(input, index)
+        backtracking_storage: list[list[int]] = [res]
+        logger.debug("| "* indent, "add to storage", res)
+        indent += 1
+        
+        result: list[int] = []
+        while backtracking_storage:
+            if len(backtracking_storage) >= length:
+                res = backtracking_storage.pop()
+                result.extend(res)
+                indent -= 1
+                logger.debug("| "* indent, "add to result", res)
+            elif backtracking_storage[-1]:
+                next_index = backtracking_storage[-1].pop(0)
+                logger.debug("| "* indent, "pop last storage", backtracking_storage[-1], next_index)
+                indent += 1
+                res = self.regexes[len(backtracking_storage)].matches(input, next_index)
+                backtracking_storage.append(res)
+                logger.debug("| "* indent, "add to storage", res)
+            else:
+                indent -= 1
+                logger.debug("| "* indent, "storage empty")
+                _ = backtracking_storage.pop()
+        indent -= 1
+        logger.debug("| "* indent, "->Con", self.start, self.end, result)
+        return result
 
 @dataclass
 class Group(Spanned):
     contents: Alt
-    # @debug
-    def matches(self, input: str, index: int, starting_concat: int = 0) -> Generator[int, Never, None]:
-        return self.contents.matches(input, index, starting_concat)
+
+    def matches(self, input: str, index: int) -> list[int]:
+        global indent
+        logger.debug("| "* indent, "Group", self.start, self.end, index)
+        indent += 1
+        result = self.contents.matches(input, index)
+        indent -= 1
+        logger.debug("| "* indent, "->Group", self.start, self.end, result)
+        return result
+
 @dataclass
 class Repeat(Spanned):
     repeated: Repeatable
-    # @debug
-    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
-        match_indexes: list[int] = [index]
-        while True:
-            try:
-                next_index = self.repeated.matches(input, index)
-            except 
+
+    def matches(self, input: str, index: int) -> list[int]:
+        global indent
+        logger.debug("| "* indent, "Repeat", self.start, self.end, index)
+        indent += 1
+
+        output: list[list[int]] = []
+        for index in self.repeated.matches(input, index):
+            output.append([index])
+            output.append(self.matches(input, index))
+
+        indent -= 1
+        logger.debug("| "* indent, "->Repeat", self.start, self.end, output[::-1])
+        return [inner for nested in output[::-1] for inner in nested]
+
+        # global indent
+        # logger.debug("| "* indent, "Repeat", self.start, self.end, index)
+        # indent += 1
+
+        # res = self.repeated.matches(input, index)
+        # backtracking_storage: list[list[int]] = [res]
+        # logger.debug("| "* indent, "rres add", res)
+        # indent += 1
+
+        # result: list[list[int]] = [res[::]]
+
+        # while backtracking_storage:
+        #     if backtracking_storage[-1]:
+        #         next_index = backtracking_storage[-1].pop(0)
+        #         logger.debug("| "* indent, "rmatching at", next_index)
+        #         logger.debug("| "* indent, "pop last rstorage", backtracking_storage[-1], next_index)
+        #         indent += 1
+        #         res = self.repeated.matches(input, next_index)
+        #         result.append(res[::])
+        #         logger.debug("| "* indent, "rres add", res)
+        #         backtracking_storage.append(res)
+        #     else:
+        #         indent -= 1
+        #         logger.debug("| "* indent, "rstorage empty")
+        #         _ = backtracking_storage.pop()
+        # indent -= 1
+        # logger.debug("| "* indent, "->Repeat", self.start, self.end, result[::-1])
+        # return [inner for nested in result[::-1] for inner in nested]
+
 @dataclass
 class RegexError(Spanned):
     inner: RegexItem | None | Alt
     message: str
-    # @debug
-    def matches(self, _input: str, _index: int) -> Generator[int, Never, None]:
-        yield from []
-Repeatable = Group | RegexLiteral | RegexError | CharSet
-type RegexItem = Repeat | Repeatable
+
+    def matches(self, _input: str, _index: int) -> list[int]:
+        return []
+
+type RegexItem = Group | Repeat | RegexLiteral | RegexError
+Repeatable = Group | RegexLiteral | RegexError
 type Regex = Alt | Concat | RegexItem
+
 def parser(tokens: Sequence[Token]) -> Alt:
     index = 0
     span_index = 0
@@ -185,6 +198,7 @@ def parser(tokens: Sequence[Token]) -> Alt:
     length = len(tokens)
     concat_storage: list[Concat] = []
     current_concat: list[RegexItem] = []
+
     def push_current_concat_to_storage():
         nonlocal concat_storage, current_concat, span_index
         if len(current_concat) > 0:
@@ -192,11 +206,12 @@ def parser(tokens: Sequence[Token]) -> Alt:
         else:
             concat_storage.append(Concat(span_index, span_index, current_concat))
         current_concat = []
+
     while index < length:
         match tokens[index]:
-            case RegexLiteral() | CharSet() | RegexError() as regex:
-                current_concat.append(regex)
-                span_index += regex.length
+            case RegexLiteral() as literal:
+                current_concat.append(literal)
+                span_index += literal.length
             case TokenPlus():
                 if len(current_concat) > 0:
                     for_inspection = current_concat.pop()
@@ -237,27 +252,6 @@ def parser(tokens: Sequence[Token]) -> Alt:
         push_current_concat_to_storage()
     return Alt(concat_storage[0].start, concat_storage[-1].end, concat_storage)
 
-@dataclass
-class MatchAction:
-    regex: type[Regex]
-    parent_index: int | None
-    end: int
-    child_matches: list[MatchInfo]
-    @property
-    def length(self) -> int:
-        return self.end - self.start
-    
-    # def backtrack(self):
-                                                                                                                                                                                                                     
-# def matches(regex: Alt, input: str, index: int) -> bool:
-#     group_stack: list[tuple[list[Concat], list[RegexItem], int]] = []
-#     concat_storage: list[Concat] = []
-#     current_concat: list[RegexItem] = []
-#     length = len(input)
-#     while True:
-#         match regex:
-#             case Alt():
-
 @final
 class Editor(tk.Tk):
     def __init__(self):
@@ -268,13 +262,16 @@ class Editor(tk.Tk):
         text_widget.pack(side="top", anchor="n", expand=False)
         _ = text_widget.bind("<KeyRelease>", lambda e: self.highlight_text(e))
         self.entry_frame.pack(side="left", anchor="nw", expand=False)
+
     def highlight_text(self, event: tk.Event):
         widget = event.widget
         if not isinstance(widget, tk.Text):
             raise RuntimeError("Tried to highlight non-text widget")
+
         for tag in widget.tag_names(index=None):
             if tag.startswith("highlight"):
                 widget.tag_remove(tag, "1.0", tk.END)
+
         height = widget.winfo_height()
         area_start = widget.count("1.0", widget.index("@0,0"))
         area_start = area_start[0] if area_start is not None else 0
@@ -289,14 +286,13 @@ class Editor(tk.Tk):
             # _ = widget.tag_configure(f"highlight-{start}-{end}", background=color)
             widget.tag_add(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
             _ = widget.tag_configure(f"highlight-{color}", background=color)
+
         parsed = parser(lexer(widget.get("1.0", tk.END)[:-1]))
         # print(parsed)
         stack: list[RegexItem | Concat | Alt] = [parsed]
         while stack:
             current = stack.pop()
             match current:
-                case CharSet():
-                    highlight_text_widget(current.start, current.end, "orange")
                 case Group():
                     highlight_text_widget(current.start, current.contents.start, "lightgreen")
                     stack.append(current.contents)
@@ -321,27 +317,16 @@ class Editor(tk.Tk):
                     stack.extend(current.concats)
                     for index in range(1, len(current.concats)):
                         highlight_text_widget(current.concats[index-1].end, current.concats[index].start, "lightblue")
+
 if __name__ == "__main__":
+    if "-v" in sys.argv:
+        logging.basicConfig(level=logging.DEBUG)
+        sys.argv.remove("-v")
     if len(sys.argv) == 1:
         Editor().mainloop()
-    if sys.argv[1] == "time":
-        if sys.argv[2] == "eval":
-            inp = str(eval(sys.argv[3]))  # pyright: ignore[reportAny]
-        else:
-            inp = sys.argv[2]
-        start = perf_counter()
-        lexed = lexer(inp)
-        end_lexing = perf_counter()
-        print(f"Lexing took {end_lexing - start}")
-        _ = parser(lexed)
-        print(f"Parsing took {perf_counter() - end_lexing}")
-    else:
+    elif len(sys.argv) > 3 and sys.argv[2] == "matches":
         lexed = lexer(sys.argv[1])
-        print(lexed)
         parsed = parser(lexed)
-        print(parsed)
-        if len(sys.argv) > 3 and sys.argv[2] == "matches":
-            if len(sys.argv) > 4 and sys.argv[4] == "debug":
-                breakpoint()
-            print(parsed.matches(sys.argv[3], 0, 0))
-        
+        # breakpoint()
+        match = parsed.matches(sys.argv[3], 0)
+        print([*match])
