@@ -1,381 +1,458 @@
-from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-import string
-from typing import Callable, Concatenate, Generic, Never, TypeVar, final, overload, override
+from functools import partial
+from typing import (
+    Any,
+    Callable,
+    Concatenate,
+    Never,
+    overload,
+    override,
+    final
+)
 
+type SuperNeverCallable = (
+    Callable[[], object]
+    | Callable[[Never], object]
+    | Callable[[Never, Never], object]
+    | Callable[[Never, Never, Never], object]
+)
 
-OK_T = TypeVar("OK_T", covariant=True)
+@final
+class Ok[T]:
+    __match_args__ = ("_value",)
 
-
-@dataclass
-class Ok(Generic[OK_T]):
-    value: OK_T
-
-
-ERR_T = TypeVar("ERR_T", covariant=True)
-
-
-@dataclass
-class Err(Generic[ERR_T]):
-    value: ERR_T
-
-
-type Result[T, E] = Ok[T] | Err[E]
-
-
-class Parser[I: Sequence[object], O, E](ABC):
-    @abstractmethod
-    def parse(self, input: I) -> Result[tuple[I, O], E]: ...
-
-    # def __init_subclass__(cls) -> None:
-    #     cls._parse = cls.parse
-    #     def parse_wrapper(self, input: I) -> Result[tuple[I, O], E]:
-    #         self.
-    #     cls.parse = lambda s, x: print(f"Running parser {s.__class__.__name__} with input {x!r}") or cls._parse(s, x)
-
-    @overload
-    def repeated(self, min: None, max: int | None) -> Parser[I, Sequence[O], Never]: ...
-    @overload
-    def repeated(self, min: int | None, max: int | None) -> Parser[I, Sequence[O], DidNotMatchEnough[Sequence[O]]]: ...
-    def repeated(self, min: int | None, max: int | None) -> Parser[I, Sequence[O], DidNotMatchEnough[Sequence[O]]]:
-        return Repeated(self, min, max)
-
-    def optional(self) -> Parser[I, O | None, Never]:
-        return Optional(self)
-
-    def map[New_O, **P](
-        self,
-        map_to: Callable[Concatenate[O, P], New_O],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Parser[I, New_O, E]:
-        return Map(self, map_to, *args, **kwargs)
-
-    def map_err[New_E, **P](
-        self,
-        map_to: Callable[Concatenate[E, P], New_E],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Parser[I, O, New_E]:
-        return MapErr(self, map_to, *args, **kwargs)
-
-    def then[O_O, O_E](self, other_parser: Parser[I, O_O, O_E]) -> Parser[I, tuple[O, O_O], E | O_E]:
-        return Then(self, other_parser)
-
-    def ignore_then[N_O, N_E](
-        self, next_parser: Parser[I, N_O, N_E]
-    ) -> Parser[I, N_O, E | N_E]:
-        return IgnoreThen(self, next_parser)
-
-    def then_ignore[N_O, N_E](
-        self, next_parser: Parser[I, N_O, N_E]
-    ) -> Parser[I, O, E | N_E]:
-        return ThenIgnore(self, next_parser)
-    
-    def to[N_O](self, to: N_O) -> Parser[I, N_O, E]:
-        return To(self, to)
-    
-    def err_to[N_E](self, err_to: N_E) -> Parser[I, O, N_E]:
-        return ErrTo(self, err_to)
-
-
-class FailedToMatch[T](Err[T]): ...
-
-
-@dataclass
-class just[T](Parser[Sequence[T], T, FailedToMatch[T]]):
-    item: T
+    def __init__(self, value: T):
+        self._value = value
 
     @override
-    def parse(self, input: Sequence[T]) -> Result[tuple[Sequence[T], T], FailedToMatch[T]]:
-        if input and input[0] == self.item:
-            return Ok((input[1:], input[0]))
-        else:
-            return Err(FailedToMatch(self.item))
+    def __repr__(self) -> str:
+        return f"Ok({self._value!r})"
 
+    def is_ok(self) -> bool:
+        return True
 
-@dataclass
-class choice[T](Parser[Sequence[T], T, FailedToMatch[Sequence[T]]]):
-    choices: Sequence[T]
+    def unwrap_or_default(self, _default: object) -> T:
+        return self._value
 
-    @override
-    def parse(self, input: Sequence[T]) -> Result[tuple[Sequence[T], T], FailedToMatch[Sequence[T]]]:
-        if input and input[0] in self.choices:
-            return Ok((input[1:], input[0]))
-        else:
-            return Err(FailedToMatch(self.choices))
+    def map_ok[U](self, func: Callable[[T], U]) -> Ok[U]:
+        return Ok(func(self._value))
+
+    def star_map_ok[U, *TS](self: Ok[tuple[*TS]], func: Callable[[*TS], U]) -> Ok[U]:
+        return Ok(func(*self._value))
+
+    def flatten[O, E](self: Result[Result[O, E], E]) -> Result[O, E]:
+        match self:
+            case Ok(inner):
+                return inner
+            case err:
+                return err
 
 
 @final
-class first_of[I: Sequence[object], O, E](Parser[I, O, E | None]):
-    def __init__(self, *parsers: Parser[I, O, E]):
-        self.parsers = parsers
+class Err[E]:
+    __match_args__ = ("_value",)
+
+    def __init__(self, value: E):
+        self._value = value
 
     @override
-    def parse(self, input: I) -> Result[tuple[I, O], E | None]:
-        for parser in self.parsers:
-            match parser.parse(input):
-                case Ok((input, value)):
-                    return Ok((input, value))
-                case Err(err):
-                    return Err(err)
-        return Err(None)
+    def __repr__(self) -> str:
+        return f"Err({self._value!r})"
+
+    def is_ok(self) -> bool:
+        return False
+
+    def unwrap_or_default[D](self, default: D) -> D:
+        return default
+
+    def map_ok[U](self, _func: SuperNeverCallable) -> Err[E]:
+        return self
+
+    def star_map_ok[U, *TS](self, _func: SuperNeverCallable) -> Err[E]:
+        return self
+
+    def flatten[T](self: Result[Result[T, E], E]) -> Result[T, E]:
+        match self:
+            case Ok(inner):
+                return inner
+            case err:
+                return err
 
 
-class EOF[I: Sequence[object]](Parser[I, None, None]):
+type Result[O, E] = Ok[O] | Err[E]
+
+type ParserOutput[I, O, E] = Result[tuple[Sequence[I], O], E]
+
+
+type ParserFunction[I, O, E] = Callable[[Sequence[I]], ParserOutput[I, O, E]]
+
+
+class bind[T](partial[T]):
+    """
+    An improved version of partial which accepts Ellipsis (...) as a placeholder
+    """
+
     @override
-    def parse(self, input: I) -> Result[tuple[I, None], None]:
-        if not input:
-            return Ok((input, None))
+    def __call__(self, /, *args: Any, **keywords: Any) -> T:  # pyright: ignore[reportExplicitAny, reportAny]
+        keywords = {**self.keywords, **keywords}
+        iargs = iter(args)
+        args = (next(iargs) if arg is ... else arg for arg in self.args)  # pyright: ignore[reportAny, reportAssignmentType]
+        return self.func(*args, *iargs, **keywords)
+
+
+def find_name(func: Callable[..., object]) -> str:
+    if isinstance(func, bind):
+        extra_name: list[str] = []
+        for arg in func.args:  # pyright: ignore[reportAny]
+            if isinstance(arg, Parser) or arg == ...:
+                continue
+            if hasattr(arg, "__name__"):  # pyright: ignore[reportAny]
+                extra_name.append(arg.__name__)  # pyright: ignore[reportAny]
+            else:
+                extra_name.append(repr(arg))  # pyright: ignore[reportAny]
+        extra = ", ".join(extra_name)
+        return func.func.__name__ + (" " + extra if extra else "")
+    else:
+        if hasattr(func, "__name__"):
+            return func.__name__
         else:
-            return Err(None)
+            return repr(func)
 
 
-class DidNotMatchEnough[T](Err[T]): ...
+indentation = 0
 
-@dataclass
-class Repeated[I: Sequence[object], O, E](Parser[I, Sequence[O], DidNotMatchEnough[Sequence[O]]]):
-    parser: Parser[I, O, E]
-    min: int | None
-    max: int | None
 
-    @override
-    def parse(self, input: I) -> Result[tuple[I, Sequence[O]], DidNotMatchEnough[Sequence[O]]]:
+def trace_args[**P, T](func: Callable[P, T]) -> Callable[P, T]:
+    def inner(*args: P.args, **kwargs: P.kwargs) -> T:
+        global indentation
+        print("  " * indentation, find_name(func), args, kwargs)
+        indentation += 1
+        output = func(*args, **kwargs)
+        indentation -= 1
+        print("  " * indentation, output)
+        return output
+
+    return inner
+
+
+def parser_maker[I, O, E, **P](
+    processor: Callable[Concatenate[Sequence[I], P], ParserOutput[I, O, E]],
+) -> Callable[P, Parser[I, O, E]]:
+    def made_parser(*args: P.args, **kwargs: P.kwargs) -> Parser[I, O, E]:
+        return Parser(trace_args(bind(processor, ..., *args, **kwargs)))
+
+    return made_parser
+
+
+def method_parser_maker[S, I, O, E, **P](
+    processor: Callable[Concatenate[S, Sequence[I], P], ParserOutput[I, O, E]],
+) -> Callable[Concatenate[S, P], Parser[I, O, E]]:
+    def made_parser(self: S, *args: P.args, **kwargs: P.kwargs) -> Parser[I, O, E]:
+        return Parser(trace_args(bind(processor, self, ..., *args, **kwargs)))
+
+    return made_parser
+
+
+class Parser[I, O, E]:
+    _processor: ParserFunction[I, O, E]
+
+    def __init__(self, processor: ParserFunction[I, O, E]):
+        self._processor = processor
+
+    def parse(self, input: Sequence[I]) -> ParserOutput[I, O, E]:
+        return self._processor(input)
+
+    @method_parser_maker
+    def then[OTHER_O, OTHER_E](
+        self, input: Sequence[I], other: Parser[I, OTHER_O, OTHER_E]
+    ) -> ParserOutput[I, tuple[O, OTHER_O], E | OTHER_E]:
+        return (
+            self.parse(input)
+            .star_map_ok(
+                lambda input, self_output: other.parse(input).star_map_ok(
+                    lambda input, other_output: (input, (self_output, other_output))
+                )
+            )
+            .flatten()
+        )
+
+    @method_parser_maker
+    def then_ignore[OTHER_O, OTHER_E](
+        self, input: Sequence[I], other: Parser[I, OTHER_O, OTHER_E]
+    ) -> ParserOutput[I, O, E | OTHER_E]:
+        return (
+            self.parse(input)
+            .star_map_ok(
+                lambda input, self_output: other.parse(input).star_map_ok(
+                    lambda input, _: (input, self_output)
+                )
+            )
+            .flatten()
+        )
+
+    @method_parser_maker
+    def ignore_then[OTHER_O, OTHER_E](
+        self, input: Sequence[I], other: Parser[I, OTHER_O, OTHER_E]
+    ) -> ParserOutput[I, OTHER_O, E | OTHER_E]:
+        return (
+            self.parse(input)
+            .star_map_ok(
+                lambda input, _: other.parse(input).star_map_ok(
+                    lambda input, other_output: (input, other_output)
+                )
+            )
+            .flatten()
+        )
+
+    @method_parser_maker
+    def map_output[New_O](
+        self, input: Sequence[I], mapping: Callable[[O], New_O]
+    ) -> ParserOutput[I, New_O, E]:
+        return self.parse(input).star_map_ok(
+            lambda input, value: (input, mapping(value))
+        )
+
+    @method_parser_maker
+    def map_ok_output[New_O, S_T, S_E](
+        self: Parser[I, Result[S_T, S_E], E],
+        input: Sequence[I],
+        mapping: Callable[[S_T], New_O],
+    ) -> ParserOutput[I, Result[New_O, S_E], E]:
+        match self.parse(input):
+            case Ok((input, value)):
+                match value:
+                    case Ok(inner_value):
+                        return Ok((input, Ok(mapping(inner_value))))
+                    case err:
+                        return Ok((input, err))
+            case err:
+                return err
+
+    @method_parser_maker
+    def map_output_and_err[New_O, New_E](
+        self,
+        input: Sequence[I],
+        mapping: Callable[[Result[O, E]], Result[New_O, New_E]],
+    ) -> ParserOutput[I, New_O, New_E]:
+        match self.parse(input):
+            case Ok((input, value)):
+                result = mapping(Ok(value))
+            case err:
+                result = mapping(err)
+        return result.map_ok(lambda new_value: (input, new_value))
+
+    @method_parser_maker
+    def star_map_output[New_O, *TS](
+        self: Parser[I, tuple[*TS], E],
+        input: Sequence[I],
+        mapping: Callable[[*TS], New_O],
+    ) -> ParserOutput[I, New_O, E]:
+        return self.parse(input).star_map_ok(
+            lambda input, value: (input, mapping(*value))
+        )
+
+    @overload
+    @method_parser_maker
+    def repeated(
+        self, input: Sequence[I], min: None, max: int | None
+    ) -> ParserOutput[I, Sequence[O], Never]: ...
+    @overload
+    @method_parser_maker
+    def repeated(
+        self, input: Sequence[I], min: int | None, max: int | None
+    ) -> ParserOutput[I, Sequence[O], Sequence[O]]: ...
+    @method_parser_maker
+    def repeated(
+        self, input: Sequence[I], min: int | None, max: int | None
+    ) -> ParserOutput[I, Sequence[O], Sequence[O]]:
         output: list[O] = []
         index = 0
         while True:
-            if index > self.max if self.max is not None else False:
-                break 
-            match self.parser.parse(input):
+            if index > max if max is not None else False:
+                break
+            match self.parse(input):
                 case Ok((input, value)):
                     output.append(value)
                 case Err(value):
                     break
             index += 1
-        if self.min is not None and self.min <= index:
+        if min is None or min <= index:
             return Ok((input, output))
         else:
-            return Err(DidNotMatchEnough(output))
+            return Err(output)
 
-
-@dataclass
-class Optional[I: Sequence[object], O, E](Parser[I, O | None, Never]):
-    parser: Parser[I, O, E]
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, O | None], Never]:
-        match self.parser.parse(input):
-            case Ok(value):
-                return Ok(value)
-            case Err(value):
+    @method_parser_maker
+    def optional(self, input: Sequence[I]) -> ParserOutput[I, O | None, Never]:
+        match self.parse(input):
+            case Ok() as ok:
+                return ok
+            case Err():
                 return Ok((input, None))
 
+    @method_parser_maker
+    def err_to[U](self, input: Sequence[I], to: U) -> ParserOutput[I, O, U]:
+        match self.parse(input):
+            case Ok() as ok:
+                return ok
+            case Err():
+                return Err(to)
 
-@final
-class Map[I: Sequence[object], O, E, Old_O, **P](Parser[I, O, E]):
-    def __init__(
-        self,
-        parser: Parser[I, Old_O, E],
-        map_to: Callable[Concatenate[Old_O, P], O],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ):
-        self.parser = parser
-        self.map_to = map_to
-        self.args = args
-        self.kwargs = kwargs
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, O], E]:
-        match self.parser.parse(input):
-            case Ok((input, value)):
-                return Ok((input, self.map_to(value, *self.args, **self.kwargs)))
-            case Err(err):
-                return Err(err)
-
-
-@final
-class MapErr[I: Sequence[object], O, E, Old_E, **P](Parser[I, O, E]):
-    def __init__(
-        self,
-        parser: Parser[I, O, Old_E],
-        map_to: Callable[Concatenate[Old_E, P], E],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ):
-        self.parser = parser
-        self.map_to = map_to
-        self.args = args
-        self.kwargs = kwargs
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, O], E]:
-        match self.parser.parse(input):
-            case Ok((input, value)):
-                return Ok((input, value))
-            case Err(err):
-                return Err(self.map_to(err, *self.args, **self.kwargs))
-
-
-@dataclass
-class Then[I: Sequence[object], L_O, R_O, L_E, R_E](Parser[I, tuple[L_O, R_O], L_E | R_E]):
-    left: Parser[I, L_O, L_E]
-    right: Parser[I, R_O, R_E]
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, tuple[L_O, R_O]], L_E | R_E]:
-        match self.left.parse(input):
-            case Ok((input, l_value)):
-                match self.right.parse(input):
-                    case Ok((input, r_value)):
-                        return Ok((input, (l_value, r_value)))
-                    case Err(err):
-                        return Err(err)
-            case Err(err):
-                return Err(err)
-
-
-@dataclass
-class IgnoreThen[I: Sequence[object], L_O, R_O, L_E, R_E](Parser[I, R_O, L_E | R_E]):
-    left: Parser[I, L_O, L_E]
-    right: Parser[I, R_O, R_E]
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, R_O], L_E | R_E]:
-        match self.left.parse(input):
-            case Ok((input, _)):
-                # TODO: Why can't this be returned directly?
-                match self.right.parse(input):
-                    case Ok((input, value)):
-                        return Ok((input, value))
-                    case Err(err):
-                        return Err(err)
-            case Err(err):
-                return Err(err)
-
-
-@dataclass
-class ThenIgnore[I: Sequence[object], L_O, R_O, L_E, R_E](Parser[I, L_O, L_E | R_E]):
-    left: Parser[I, L_O, L_E]
-    right: Parser[I, R_O, R_E]
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, L_O], L_E | R_E]:
-        match self.left.parse(input):
-            case Ok((input, value)):
-                match self.right.parse(input):
-                    case Ok((input, _)):
-                        return Ok((input, value))
-                    case Err(err):
-                        return Err(err)
-            case Err(err):
-                return Err(err)
-
-
-@dataclass
-class SeperatedBy[T, O, E](Parser[Sequence[T], Sequence[O], Never]):
-    parser: Parser[Sequence[T], O, E]
-    seperator: T
-
-    @override
-    def parse(self, input: Sequence[T]) -> Result[tuple[Sequence[T], Sequence[O]], Never]:
+    @method_parser_maker
+    def seperated_by(
+        self, input: Sequence[I], seperator: I
+    ) -> ParserOutput[I, Sequence[O], Never]:
         output: list[O] = []
         while True:
-            match self.parser.parse(input):
+            match self.parse(input):
                 case Ok((input, value)):
                     output.append(value)
                 case Err():
-                    pass
-            match just(self.seperator).parse(input):
-                case Ok():
+                    break
+            match just(seperator).parse(input):
+                case Ok((input, _)):
                     pass
                 case Err():
                     break
         return Ok((input, output))
 
-
-@dataclass
-class To[I: Sequence[object], O, N_O, E](Parser[I, N_O, E]):
-    parser: Parser[I, O, E]
-    _to: N_O
+    @method_parser_maker
+    def on_error[OTHER_O, OTHER_E](
+        self, input: Sequence[I], other: Parser[I, OTHER_O, OTHER_E]
+    ) -> ParserOutput[I, O | OTHER_O, OTHER_E]:
+        match self.parse(input):
+            case Ok() as ok:
+                return ok
+            case Err():
+                return other.parse(input)
     
-    @override
-    def parse(self, input: I) -> Result[tuple[I, N_O], E]:
-        match self.parser.parse(input):
-            case Ok((input, _)):
-                return Ok((input, self._to))
-            case err:
+    @method_parser_maker
+    def spanned(self, input: Sequence[I]) -> ParserOutput[I, tuple[Sequence[I], O], E]:
+        match self.parse(input):
+            case Ok((new_input, value)):
+                return Ok((new_input, (input[:len(input) - len(new_input)], value)))
+            case Err()as err:
                 return err
 
 
+@parser_maker
+def just[I](input: Sequence[I], item: I) -> ParserOutput[I, I, None]:
+    if input and input[0] == item:
+        return Ok((input[1:], item))
+    else:
+        return Err(None)
+
+
+@parser_maker
+def choice[I](input: Sequence[I], choices: Sequence[I]) -> ParserOutput[I, I, None]:
+    if input and input[0] in choices:
+        return Ok((input[1:], input[0]))
+    else:
+        return Err(None)
+
+
+@parser_maker
+def first_of[I, O, E](
+    input: Sequence[I], *parsers: Parser[I, O, E]
+) -> ParserOutput[I, O, E | None]:
+    for parser in parsers:
+        match parser.parse(input):
+            case Ok((input, value)):
+                return Ok((input, value))
+            case _err:
+                pass
+    return Err(None)
+
+
+@parser_maker
+def eof[I](input: Sequence[I]) -> ParserOutput[I, None, None]:
+    if not input:
+        return Ok((input, None))
+    else:
+        return Err(None)
+
+def spanned[I, O, E, **P](func: Callable[Concatenate[Sequence[I], P], ParserOutput[I, O, E]]) -> Callable[Concatenate[Sequence[I], P], ParserOutput[I, tuple[Sequence[I], O], E]]:
+    def wrapper(input: Sequence[I], *args: P.args, **kwargs: P.kwargs) -> ParserOutput[I, tuple[Sequence[I], O], E]:
+        match func(input, *args, **kwargs):
+            case Ok((new_input, value)):
+                return Ok((new_input, (input[:len(input)-len(new_input)], value)))
+            case Err() as err:
+                return err
+    return wrapper
+
 @dataclass
-class ErrTo[I: Sequence[object], O, E, N_E](Parser[I, O, N_E]):
-    parser: Parser[I, O, E]
-    _err_to: N_E
-    
-    @override
-    def parse(self, input: I) -> Result[tuple[I, O], N_E]:
-        match self.parser.parse(input):
-            case Err(_):
-                return Err(self._err_to)
-            case ok:
-                return ok
+class RegexItem:
+    span: Sequence[str]
 
-
-@dataclass
-class ParserFunction[I: Sequence[object], O, E](Parser[I, O, E]):
-    inner_function: Callable[[], Parser[I, O, E]]
-
-    @override
-    def parse(self, input: I) -> Result[tuple[I, O], E]:
-        return self.inner_function().parse(input)
-
-
-def parser_function[I: Sequence[object], O, E](
-    func: Callable[[], Parser[I, O, E]],
-) -> Parser[I, O, E]:
-    """
-    A decorator that turns a function that returns a parser into a parser object.
-
-    This will delay evaluation of the function until parse time, which prevents infinite loop issue with right-recursive parsers.
-
-    Note that this does not fix issues with left-recursive parsers, which will still make an infinite loop at parse time.
-    """
-    return ParserFunction(func)
-
-
-class RegexItem: ...
 
 @dataclass
 class RegexError(RegexItem):
     regex: RegexItem | str
+
+
+def move_regex_error_to_output[T](
+    parser_result: Result[T, RegexError],
+) -> Result[T | RegexError, Never]:
+    match parser_result:
+        case Ok() as ok:
+            return ok
+        case Err(err):
+            return Ok(err)
+
+
+@dataclass
 class SkipParsing: ...
+
 
 @dataclass
 class RegexLiteral(RegexItem):
     literal: str
 
 
-@parser_function
-def literals() -> Parser[Sequence[str], RegexLiteral, RegexError | SkipParsing]:
-    return choice(string.ascii_letters + string.digits).err_to(SkipParsing()).map(RegexLiteral)
-
-
 @dataclass
 class CharSet(RegexItem):
+    inverted: bool
     characters: Sequence[RegexLiteral]
 
 
-@parser_function
-def char_set() -> Parser[Sequence[str], CharSet, RegexError | SkipParsing]:
-    return (
-        just("[").err_to(SkipParsing())
-        .ignore_then(just("[").map(RegexLiteral).then(literals.repeated(1, None)).err_to(RegexError("Empty charset")))
-        .then_ignore(just("]").err_to(RegexError("Unclosed charset")))
-        .map(lambda x: (x[0], *x[1]))
-        .map(CharSet)
-    )
+def regex_error_to_ok(err: object):
+    if isinstance(err, RegexError):
+        return Ok(err)
+    else:
+        return Err(err)
+
+
+@parser_maker
+def char_set(
+    input: Sequence[str],
+) -> ParserOutput[str, Result[CharSet, RegexError], SkipParsing]:
+    orig_input = input 
+    match just("[").parse(input):
+        case Ok((input, _)):
+            match just("^").parse(input):
+                case Ok((input, _)):
+                    inverse = True
+                case Err():
+                    inverse = False
+            match just("]").spanned().parse(input):
+                case Ok((input, c)):
+                    contents = [RegexLiteral(*c)]
+                case Err():
+                    contents = []
+            while True:
+                match just("]").parse(input):
+                    case Ok((input, _)):
+                        return Ok((input, Ok(CharSet(orig_input[:len(orig_input) - len(input)], inverse, contents))))
+                    case Err():
+                        pass
+
+                if input:
+                    contents.append(RegexLiteral(input[0], input[0]))
+                    input = input[1:]
+                else:
+                    return Ok((input, Err(RegexError("", CharSet(orig_input[:len(orig_input) - len(input)], inverse, contents)))))
+        case Err():
+            return Err(SkipParsing())
 
 
 @dataclass
@@ -383,47 +460,91 @@ class Group(RegexItem):
     regex: Alt
 
 
-@parser_function
-def group() -> Parser[Sequence[str], Group, RegexError | SkipParsing]:
-    return just("(").err_to(SkipParsing()).ignore_then(alt).then_ignore(just(")").err_to(RegexError("UnclosedGroup"))).map(Group)
+@parser_maker
+def group(
+    input: Sequence[str],
+) -> ParserOutput[str, Result[Group, RegexError], SkipParsing]:
+    match just("(").spanned().parse(input):
+        case Ok((input, (span1, _))):
+            match alt().spanned().parse(input):
+                case Ok((input, (span2, value))):
+                    match just(")").spanned().parse(input):
+                        case Ok((input, (span3, _))):
+                            return Ok((input, Ok(Group((*span1, *span2, *span3), value))))
+                        case Err():
+                            return Ok((input, Err(RegexError((*span1, *span2), Group((*span1, *span2), value)))))
+                case Err():
+                    assert False, "Unreachable"
+        case Err():
+            return Err(SkipParsing())
 
 
 @dataclass
 class Alt:
+    span: Sequence[str]
     concats: Sequence[Concat]
 
 
-@parser_function
-def alt() -> Parser[Sequence[str], Alt, Never]:
-    return SeperatedBy(concat, "|").map(Alt)
+@parser_maker
+def alt(input: Sequence[str]) -> ParserOutput[str, Alt, Never]:
+    return concat().seperated_by("|").spanned().star_map_output(Alt).parse(input)
 
 
 @dataclass
 class Concat:
-    regexes: Sequence[RegexItem]
+    span: Sequence[str]
+    regexes: Sequence[Result[RegexItem, RegexError]]
 
 
-@parser_function
-def concat() -> Parser[Sequence[str], Concat, RegexError]:
-    return regex_item.repeated(None, None).map(Concat)
+@parser_maker
+def concat(input: Sequence[str]) -> ParserOutput[str, Concat, RegexError]:
+    return regex_item().repeated(None, None).spanned().star_map_output(Concat).parse(input)
 
 
-@parser_function
-def regex_item() -> Parser[Sequence[str], RegexItem, RegexError]:
-    return repeatable.then_ignore(just("+").optional())
+@parser_maker
+def regex_item(
+    input: Sequence[str],
+) -> ParserOutput[str, Result[RegexItem, RegexError], SkipParsing | None]:
+    return repeatable().then_ignore(just("+").optional()).parse(input)
 
 
-@parser_function
-def repeatable() -> Parser[Sequence[str], RegexItem, RegexError]:
-    return first_of(group, char_set, literals)
+@parser_maker
+def unopened_errors(input: Sequence[str]) -> ParserOutput[str, RegexError, None]:
+    if input and input[0] in ")]":
+        return Ok((input[1:], RegexError(input[0], input[0])))
+    else:
+        return Err(None)
 
 
-def regex() -> Parser[Sequence[str], Alt, None]:
-    return alt.then_ignore(EOF())
+@parser_maker
+def get_next_nonspecial_char(input: Sequence[str]) -> ParserOutput[str, str, None]:
+    if input and input[0] not in "|)]":
+        return Ok((input[1:], input[0]))
+    else:
+        return Err(None)
+
+
+@parser_maker
+def repeatable(
+    input: Sequence[str],
+) -> ParserOutput[str, Result[RegexItem, RegexError], SkipParsing]:
+    return (
+        first_of(group(), char_set(), unopened_errors().map_output(Ok).err_to(SkipParsing()))
+        .on_error(
+            get_next_nonspecial_char().spanned().star_map_output(RegexLiteral).map_output(Ok).err_to(SkipParsing())
+        )
+        .err_to(SkipParsing())
+        .parse(input)
+    )
+
+
+@parser_maker
+def regex(input: Sequence[str]) -> ParserOutput[str, Alt, None]:
+    return alt().then_ignore(eof()).parse(input)
 
 
 def main():
-    print(regex().parse("([abc]"))
+    print(regex().parse("a+"))
 
 
 if __name__ == "__main__":
