@@ -39,13 +39,11 @@ class Editor(tk.Tk):
             # For performance, don't make highlights that wouldn't be visible anyways
             if (start < area_start and end < area_end) or (start > area_start and end > area_end):
                 return
-            # widget.tag_add(f"highlight-{start}-{end}", f"1.0+{start} chars", f"1.0+{end} chars")
-            # _ = widget.tag_configure(f"highlight-{start}-{end}", background=color)
             widget.tag_add(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
             _ = widget.tag_configure(f"highlight-{color}", background=color)
 
         parsed = to_regex_ast(widget.get("1.0", tk.END)[:-1])
-        # print(parsed)
+
         stack: list[RegexItem | Concat | Alt] = [parsed]
         while stack:
             current = stack.pop()
