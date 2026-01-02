@@ -1,15 +1,20 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial
+import string
 from typing import (
     Any,
     Callable,
+    ClassVar,
     Concatenate,
     Never,
     overload,
     override,
-    final
+    final,
 )
+import unittest
+import unittest.mock
 
 type SuperNeverCallable = (
     Callable[[], object]
@@ -17,6 +22,7 @@ type SuperNeverCallable = (
     | Callable[[Never, Never], object]
     | Callable[[Never, Never, Never], object]
 )
+
 
 @final
 class Ok[T]:
@@ -29,8 +35,22 @@ class Ok[T]:
     def __repr__(self) -> str:
         return f"Ok({self._value!r})"
 
+    @override
+    def __eq__(self, value: object, /) -> bool:
+        match value:
+            case Ok(value):
+                return self._value == value
+            case _:
+                return False
+
     def is_ok(self) -> bool:
         return True
+
+    def is_ok_and(self, test: Callable[[T], bool]) -> bool:
+        return test(self._value)
+
+    def is_err(self) -> bool:
+        return False
 
     def unwrap_or_default(self, _default: object) -> T:
         return self._value
@@ -47,6 +67,9 @@ class Ok[T]:
                 return inner
             case err:
                 return err
+    
+    def err_to[U](self, _to: U) -> Ok[T]:
+        return self
 
 
 @final
@@ -60,8 +83,22 @@ class Err[E]:
     def __repr__(self) -> str:
         return f"Err({self._value!r})"
 
+    @override
+    def __eq__(self, value: object, /) -> bool:
+        match value:
+            case Err(value):
+                return self._value == value
+            case _:
+                return False
+
     def is_ok(self) -> bool:
         return False
+
+    def is_ok_and(self, _test: SuperNeverCallable) -> bool:
+        return False
+
+    def is_err(self) -> bool:
+        return True
 
     def unwrap_or_default[D](self, default: D) -> D:
         return default
@@ -78,6 +115,9 @@ class Err[E]:
                 return inner
             case err:
                 return err
+    
+    def err_to[U](self, to: U) -> Err[U]:
+        return Err(to)
 
 
 type Result[O, E] = Ok[O] | Err[E]
@@ -213,6 +253,14 @@ class Parser[I, O, E]:
             lambda input, value: (input, mapping(value))
         )
 
+    # @method_parser_maker
+    # def map_output_with_input[New_O](
+    #     self, input: Sequence[I], mapping: Callable[[Sequence[I], O], tuple[Sequence[I], New_O]]
+    # ) -> ParserOutput[I, New_O, E]:
+    #     return self.parse(input).star_map_ok(
+    #         lambda input, value: (input, mapping(value))
+    #     )
+
     @method_parser_maker
     def map_ok_output[New_O, S_T, S_E](
         self: Parser[I, Result[S_T, S_E], E],
@@ -299,6 +347,14 @@ class Parser[I, O, E]:
                 return Err(to)
 
     @method_parser_maker
+    def output_to[U](self, input: Sequence[I], to: U) -> ParserOutput[I, U, E]:
+        match self.parse(input):
+            case Ok((input, _)):
+                return Ok((input, to))
+            case Err() as err:
+                return err
+
+    @method_parser_maker
     def seperated_by(
         self, input: Sequence[I], seperator: I
     ) -> ParserOutput[I, Sequence[O], Never]:
@@ -325,13 +381,13 @@ class Parser[I, O, E]:
                 return ok
             case Err():
                 return other.parse(input)
-    
+
     @method_parser_maker
     def spanned(self, input: Sequence[I]) -> ParserOutput[I, tuple[Sequence[I], O], E]:
         match self.parse(input):
             case Ok((new_input, value)):
-                return Ok((new_input, (input[:len(input) - len(new_input)], value)))
-            case Err()as err:
+                return Ok((new_input, (input[: len(input) - len(new_input)], value)))
+            case Err() as err:
                 return err
 
 
@@ -371,33 +427,23 @@ def eof[I](input: Sequence[I]) -> ParserOutput[I, None, None]:
     else:
         return Err(None)
 
-def spanned[I, O, E, **P](func: Callable[Concatenate[Sequence[I], P], ParserOutput[I, O, E]]) -> Callable[Concatenate[Sequence[I], P], ParserOutput[I, tuple[Sequence[I], O], E]]:
-    def wrapper(input: Sequence[I], *args: P.args, **kwargs: P.kwargs) -> ParserOutput[I, tuple[Sequence[I], O], E]:
+
+def spanned[I, O, E, **P](
+    func: Callable[Concatenate[Sequence[I], P], ParserOutput[I, O, E]],
+) -> Callable[Concatenate[Sequence[I], P], ParserOutput[I, tuple[Sequence[I], O], E]]:
+    def wrapper(
+        input: Sequence[I], *args: P.args, **kwargs: P.kwargs
+    ) -> ParserOutput[I, tuple[Sequence[I], O], E]:
         match func(input, *args, **kwargs):
             case Ok((new_input, value)):
-                return Ok((new_input, (input[:len(input)-len(new_input)], value)))
+                return Ok((new_input, (input[: len(input) - len(new_input)], value)))
             case Err() as err:
                 return err
+
     return wrapper
 
-@dataclass
-class RegexItem:
-    span: Sequence[str]
 
-
-@dataclass
-class RegexError(RegexItem):
-    regex: RegexItem | str
-
-
-def move_regex_error_to_output[T](
-    parser_result: Result[T, RegexError],
-) -> Result[T | RegexError, Never]:
-    match parser_result:
-        case Ok() as ok:
-            return ok
-        case Err(err):
-            return Ok(err)
+digits = choice(string.digits).repeated(1, None).map_output(lambda x: int("".join(x)))
 
 
 @dataclass
@@ -405,147 +451,268 @@ class SkipParsing: ...
 
 
 @dataclass
-class RegexLiteral(RegexItem):
-    literal: str
+class RegexError:
+    message: str
+    contained_regex: Result[object, RegexError] | None = None
+    regex_before: bool = False
 
 
 @dataclass
-class CharSet(RegexItem):
-    inverted: bool
-    characters: Sequence[RegexLiteral]
+class Spanned:
+    span: Sequence[str]
+    
+    def __post_init__(self):
+        self.span = "".join(self.span)
 
 
-def regex_error_to_ok(err: object):
-    if isinstance(err, RegexError):
-        return Ok(err)
-    else:
-        return Err(err)
+class Repeatable: ...
 
 
-@parser_maker
-def char_set(
-    input: Sequence[str],
-) -> ParserOutput[str, Result[CharSet, RegexError], SkipParsing]:
-    orig_input = input 
-    match just("[").parse(input):
-        case Ok((input, _)):
-            match just("^").parse(input):
-                case Ok((input, _)):
-                    inverse = True
-                case Err():
-                    inverse = False
-            match just("]").spanned().parse(input):
-                case Ok((input, c)):
-                    contents = [RegexLiteral(*c)]
-                case Err():
-                    contents = []
-            while True:
-                match just("]").parse(input):
-                    case Ok((input, _)):
-                        return Ok((input, Ok(CharSet(orig_input[:len(orig_input) - len(input)], inverse, contents))))
-                    case Err():
-                        pass
+@final
+@dataclass
+class Dot:
+    parser: ClassVar[Parser[str, Dot, SkipParsing]]
 
-                if input:
-                    contents.append(RegexLiteral(input[0], input[0]))
-                    input = input[1:]
+
+Dot.parser = just(".").output_to(Dot()).err_to(SkipParsing())
+
+
+@final
+@dataclass
+class Caret:
+    parser: ClassVar[Parser[str, Caret, SkipParsing]]
+
+
+Caret.parser = just("^").output_to(Caret()).err_to(SkipParsing())
+
+
+@final
+@dataclass
+class Dollar:
+    parser: ClassVar[Parser[str, Dollar, SkipParsing]]
+
+
+Dollar.parser = just("$").output_to(Dollar()).err_to(SkipParsing())
+
+
+class RepeatType(StrEnum):
+    greedy = ""
+    lazy = "?"
+    possessive = "+"
+
+    @parser_maker
+    @staticmethod
+    def parser(input: Sequence[str]) -> ParserOutput[str, RepeatType, Never]:
+        match choice("?+").parse(input):
+            case Ok((input, value)):
+                return Ok((input, RepeatType(value)))
+            case Err():
+                return Ok((input, RepeatType.greedy))
+
+
+repeat_char_to_length: dict[str, tuple[int, int | None]] = {
+    "*": (0, None),
+    "+": (1, None),
+    "?": (0, 1),
+}
+
+
+@final
+@dataclass
+class Repeated(Spanned):
+    type: RepeatType
+    min: int
+    max: int | None
+    repeated: Result[RegexItem, RegexError]
+
+    @parser_maker
+    @staticmethod
+    def parser(
+        input: Sequence[str],
+    ) -> ParserOutput[str, Result[Repeated, RegexError], SkipParsing]:
+        match regex_item().spanned().parse(input):
+            case Ok((input, (item_span, repeated))):
+                print(input, repeated)
+                if repeated.is_err() or repeated.is_ok_and(
+                    lambda v: isinstance(v, Repeatable)
+                ):
+                    match Repeated.tail_parser().parse(input):
+                        case Ok((input, (span, inner))):
+                            match inner:
+                                case Ok((type, min, max)):
+                                    return Ok(
+                                        (
+                                            input,
+                                            Ok(
+                                                Repeated((*item_span, *span), type, min, max, repeated)
+                                            ),
+                                        )
+                                    )
+                                case Err() as err:
+                                    return Ok((input, err))
+                        case Err() as err:
+                            return err
                 else:
-                    return Ok((input, Err(RegexError("", CharSet(orig_input[:len(orig_input) - len(input)], inverse, contents)))))
-        case Err():
-            return Err(SkipParsing())
+                    return Ok(
+                        (
+                            input,
+                            Err(RegexError("Item is not repeatable", repeated, True)),
+                        )
+                    )
+            case Err():
+                match Repeated.tail_parser().parse(input):
+                    case Ok((input, (span, inner))):
+                        match inner:
+                            case Ok((type, min, max)):
+                                return Ok(
+                                    (
+                                        input,
+                                        Err(
+                                            RegexError(
+                                                "No item to repeat",
+                                                Ok(
+                                                    Repeated(
+                                                        span,
+                                                        type,
+                                                        min,
+                                                        max,
+                                                        Ok(RegexItem()),
+                                                    )
+                                                ),
+                                            )
+                                        ),
+                                    )
+                                )
+                            case Err() as err:
+                                return Ok((input, err))
+                    case Err():
+                        return Err(SkipParsing())
 
+    @parser_maker
+    @spanned
+    @staticmethod
+    def tail_parser(
+        input: Sequence[str],
+    ) -> ParserOutput[
+        str, Result[tuple[RepeatType, int, int | None], RegexError], SkipParsing
+    ]:
+        match choice("*+?").parse(input):
+            case Ok((input, repeat)):
+                return (
+                    RepeatType.parser()
+                    .map_output(lambda type: Ok((type, *repeat_char_to_length[repeat])))
+                    .parse(input)
+                )
+            case Err():
+                match just("{").ignore_then(digits).parse(input):
+                    case Ok((input, min)):
+                        match just(",").parse(input):
+                            case Ok((input, _)):
+                                match digits.parse(input):
+                                    case Ok((input, max)):
+                                        pass
+                                    case Err():
+                                        max = None
+                            case Err():
+                                max = min
+                        match just("}").parse(input):
+                            case Ok((input, _)):
+                                return (
+                                    RepeatType.parser()
+                                    .map_output(lambda type: Ok((type, min, max)))
+                                    .parse(input)
+                                )
+                            case Err():
+                                return Err(SkipParsing())
+                    case Err():
+                        return Err(SkipParsing())
+
+
+# def escape(input: Sequence[str]) -> ParserOutput[str, object, object]: ...
+
+# @dataclass
+# class CharSet(Spanned):
+    
 
 @dataclass
-class Group(RegexItem):
-    regex: Alt
-
-
-@parser_maker
-def group(
-    input: Sequence[str],
-) -> ParserOutput[str, Result[Group, RegexError], SkipParsing]:
-    match just("(").spanned().parse(input):
-        case Ok((input, (span1, _))):
-            match alt().spanned().parse(input):
-                case Ok((input, (span2, value))):
-                    match just(")").spanned().parse(input):
-                        case Ok((input, (span3, _))):
-                            return Ok((input, Ok(Group((*span1, *span2, *span3), value))))
-                        case Err():
-                            return Ok((input, Err(RegexError((*span1, *span2), Group((*span1, *span2), value)))))
-                case Err():
-                    assert False, "Unreachable"
-        case Err():
-            return Err(SkipParsing())
-
-
-@dataclass
-class Alt:
-    span: Sequence[str]
-    concats: Sequence[Concat]
-
-
-@parser_maker
-def alt(input: Sequence[str]) -> ParserOutput[str, Alt, Never]:
-    return concat().seperated_by("|").spanned().star_map_output(Alt).parse(input)
-
-
-@dataclass
-class Concat:
-    span: Sequence[str]
-    regexes: Sequence[Result[RegexItem, RegexError]]
-
-
-@parser_maker
-def concat(input: Sequence[str]) -> ParserOutput[str, Concat, RegexError]:
-    return regex_item().repeated(None, None).spanned().star_map_output(Concat).parse(input)
+class RegexItem: ...
 
 
 @parser_maker
 def regex_item(
-    input: Sequence[str],
-) -> ParserOutput[str, Result[RegexItem, RegexError], SkipParsing | None]:
-    return repeatable().then_ignore(just("+").optional()).parse(input)
-
-
-@parser_maker
-def unopened_errors(input: Sequence[str]) -> ParserOutput[str, RegexError, None]:
-    if input and input[0] in ")]":
-        return Ok((input[1:], RegexError(input[0], input[0])))
-    else:
-        return Err(None)
-
-
-@parser_maker
-def get_next_nonspecial_char(input: Sequence[str]) -> ParserOutput[str, str, None]:
-    if input and input[0] not in "|)]":
-        return Ok((input[1:], input[0]))
-    else:
-        return Err(None)
-
-
-@parser_maker
-def repeatable(
-    input: Sequence[str],
+    _input: Sequence[str],
 ) -> ParserOutput[str, Result[RegexItem, RegexError], SkipParsing]:
-    return (
-        first_of(group(), char_set(), unopened_errors().map_output(Ok).err_to(SkipParsing()))
-        .on_error(
-            get_next_nonspecial_char().spanned().star_map_output(RegexLiteral).map_output(Ok).err_to(SkipParsing())
-        )
-        .err_to(SkipParsing())
-        .parse(input)
-    )
+    assert False
 
+if 'unittest.util' in __import__('sys').modules:  # pyright: ignore[reportAny]
+    # Show full diff in self.assertEqual.
+    __import__('sys').modules['unittest.util']._MAX_LENGTH = 999999999  # pyright: ignore[reportAny]
 
-@parser_maker
-def regex(input: Sequence[str]) -> ParserOutput[str, Alt, None]:
-    return alt().then_ignore(eof()).parse(input)
+# uvx python -m unittest .\main.py -b
+class Tests(unittest.TestCase):
+    def test_just(self):
+        self.assertEqual(just("a")
+            .output_to(Ok(None))
+            .err_to(SkipParsing()).parse("+"), Err(SkipParsing()))
+    def test_dot(self):
+        self.assertEqual(Dot.parser.parse("."), Ok(("", Dot())))
+        self.assertEqual(Dot.parser.parse("a"), Err(SkipParsing()))
 
+    def test_caret(self):
+        self.assertEqual(Caret.parser.parse("^"), Ok(("", Caret())))
+        self.assertEqual(Caret.parser.parse("a"), Err(SkipParsing()))
 
-def main():
-    print(regex().parse("a+"))
+    def test_dollar(self):
+        self.assertEqual(Dollar.parser.parse("$"), Ok(("", Dollar())))
+        self.assertEqual(Dollar.parser.parse("a"), Err(SkipParsing()))
 
+    def test_repeat(self):
+        @dataclass
+        class RepeatableItem(RegexItem, Repeatable): ...
 
-if __name__ == "__main__":
-    main()
+        with unittest.mock.patch(
+            "main.regex_item",
+            lambda: just("a")
+            .output_to(Ok(RepeatableItem()))
+            .err_to(SkipParsing()),
+        ):
+            self.assertEqual(
+                Repeated.parser().parse("a+"),
+                Ok(
+                    (
+                        "",
+                        Ok(
+                            Repeated(
+                                "a+",
+                                RepeatType.greedy,
+                                min=1,
+                                max=None,
+                                repeated=Ok(RepeatableItem()),
+                            )
+                        ),
+                    )
+                ),
+            )
+            self.assertEqual(
+                Repeated.parser().parse("+"),
+                Ok(
+                    (
+                        "",
+                        Err(
+                            RegexError(
+                                message="No item to repeat",
+                                contained_regex=Ok(
+                                    Repeated(
+                                        "+",
+                                        RepeatType.greedy,
+                                        min=1,
+                                        max=None,
+                                        repeated=Ok(RegexItem()),
+                                    )
+                                ),
+                                regex_before=False,
+                            )
+                        ),
+                    )
+                ),
+            )
