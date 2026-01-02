@@ -1,16 +1,15 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
 from pprint import pp  # pyright: ignore[reportUnusedImport]
 import sys
 from time import perf_counter
 import tkinter as tk
-from typing import final, override
+from typing import Never, final, override
 
 class Debug:
     @override
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({", ".join(f"{k}={v}" for k, v in self.__dict__.items())})"  # pyright: ignore[reportAny]
-
 debug_depth = 0
 def debug[T, **P](callable: Callable[P, T]) -> Callable[P, T]:
     def inner(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -27,7 +26,6 @@ def debug[T, **P](callable: Callable[P, T]) -> Callable[P, T]:
 class Spanned:
     start: int
     end: int
-
     @property
     def length(self) -> int:
         return self.end - self.start
@@ -39,32 +37,24 @@ class Spanned:
 @dataclass
 class RegexLiteral(Spanned):
     char: str
-
-    @debug
-    def matches(self, input: str, index: int) -> tuple[bool, int]:
+    # @debug
+    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
         if index < len(input) and input[index] == self.char:
-            return True, index + 1
-        else:
-            return False, index
+            yield index + 1
 
 @dataclass
 class CharSet(Spanned):
     chars: str
-
-    @debug
-    def matches(self, input: str, index: int) -> tuple[bool, int]:
+    # @debug
+    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
         if index < len(input) and input[index] in self.chars:
-            return True, index + 1
-        else:
-            return False, index
+            yield index + 1
 
 class TokenGroupStart(Debug): ...
 class TokenGroupEnd(Debug): ...
 class TokenAltSep(Debug): ...
 class TokenPlus(Debug): ...
-
 type Token = TokenGroupStart | TokenGroupEnd | TokenAltSep | RegexLiteral | TokenPlus | RegexError | CharSet
-
 def lexer(input: str) -> Sequence[Token]:
     index = 0
     length = len(input)
@@ -98,19 +88,16 @@ def lexer(input: str) -> Sequence[Token]:
 @dataclass
 class Alt(Spanned):
     concats: Sequence[Concat]
-
-    @debug
+    # @debug
     def matches(self, input: str, index: int, starting_concat: int = 0) -> tuple[bool, int, int]:
         for concat_index in range(starting_concat, len(self.concats)):
             matches, new_index = self.concats[concat_index].matches(input, index)
             if matches:
                 return True, new_index, concat_index
         return False, index, 0
-
 @dataclass
 class Concat(Spanned):
     regexes: Sequence[RegexItem]
-
     def regexes_to_with_info(self) -> list[tuple[RegexLiteral | CharSet, int | None] | tuple[Group | Repeat, int | None, int | None] | tuple[RegexError]]:
         output: list[tuple[RegexLiteral | CharSet, int | None] | tuple[Group | Repeat, int | None, int | None] | tuple[RegexError]] = []
         for regex in self.regexes:
@@ -122,20 +109,16 @@ class Concat(Spanned):
                 case RegexError():
                     output.append((regex,))
         return output
-
-    @debug
+    # @debug
     def matches(self, input: str, index: int) -> tuple[bool, int]:
         regex_with_info = self.regexes_to_with_info()
-
         regex_index = 0
         length = len(regex_with_info)
-
         while regex_index < length:
             # pp(regex_with_info)
             # print(index, regex_index)
             if regex_index < 0:
                 return False, index
-
             backtracking_info = regex_with_info[regex_index]
             # print(backtracking_info[0].__class__.__name__, backtracking_info[0].start, backtracking_info[0].end, backtracking_info[1:])
             match backtracking_info:
@@ -172,47 +155,29 @@ class Concat(Spanned):
 @dataclass
 class Group(Spanned):
     contents: Alt
-
-    @debug
-    def matches(self, input: str, index: int, starting_concat: int = 0) -> tuple[bool, int, int]:
+    # @debug
+    def matches(self, input: str, index: int, starting_concat: int = 0) -> Generator[int, Never, None]:
         return self.contents.matches(input, index, starting_concat)
-
 @dataclass
 class Repeat(Spanned):
     repeated: Repeatable
-
-    @debug
-    def matches(self, input: str, index: int, repeat_limit: int | None) -> tuple[bool, int, int]:
-        repeat_count = 0
-
-        if repeat_limit is None:
-            repeat_limit = 1000000000
-
-        while repeat_count < repeat_limit:
-            matches = self.repeated.matches(input, index)
-            if matches[0]:
-                repeat_count += 1
-                index = matches[1]
-            else:
-                break
-        if repeat_count >= 1:
-            return True, index, repeat_count
-        else:
-            return False, index, 0
-
+    # @debug
+    def matches(self, input: str, index: int) -> Generator[int, Never, None]:
+        match_indexes: list[int] = [index]
+        while True:
+            try:
+                next_index = self.repeated.matches(input, index)
+            except 
 @dataclass
 class RegexError(Spanned):
     inner: RegexItem | None | Alt
     message: str
-
-    @debug
-    def matches(self, _input: str, index: int) -> tuple[bool, int]:
-        return False, index
-
+    # @debug
+    def matches(self, _input: str, _index: int) -> Generator[int, Never, None]:
+        yield from []
 Repeatable = Group | RegexLiteral | RegexError | CharSet
 type RegexItem = Repeat | Repeatable
 type Regex = Alt | Concat | RegexItem
-
 def parser(tokens: Sequence[Token]) -> Alt:
     index = 0
     span_index = 0
@@ -227,7 +192,6 @@ def parser(tokens: Sequence[Token]) -> Alt:
         else:
             concat_storage.append(Concat(span_index, span_index, current_concat))
         current_concat = []
-
     while index < length:
         match tokens[index]:
             case RegexLiteral() | CharSet() | RegexError() as regex:
@@ -274,25 +238,22 @@ def parser(tokens: Sequence[Token]) -> Alt:
     return Alt(concat_storage[0].start, concat_storage[-1].end, concat_storage)
 
 @dataclass
-class MatchInfo:
-    regex: Regex
-    start: int
+class MatchAction:
+    regex: type[Regex]
+    parent_index: int | None
     end: int
     child_matches: list[MatchInfo]
-
     @property
     def length(self) -> int:
         return self.end - self.start
     
     # def backtrack(self):
                                                                                                                                                                                                                      
-
 # def matches(regex: Alt, input: str, index: int) -> bool:
 #     group_stack: list[tuple[list[Concat], list[RegexItem], int]] = []
 #     concat_storage: list[Concat] = []
 #     current_concat: list[RegexItem] = []
 #     length = len(input)
-
 #     while True:
 #         match regex:
 #             case Alt():
@@ -307,16 +268,13 @@ class Editor(tk.Tk):
         text_widget.pack(side="top", anchor="n", expand=False)
         _ = text_widget.bind("<KeyRelease>", lambda e: self.highlight_text(e))
         self.entry_frame.pack(side="left", anchor="nw", expand=False)
-
     def highlight_text(self, event: tk.Event):
         widget = event.widget
         if not isinstance(widget, tk.Text):
             raise RuntimeError("Tried to highlight non-text widget")
-
         for tag in widget.tag_names(index=None):
             if tag.startswith("highlight"):
                 widget.tag_remove(tag, "1.0", tk.END)
-
         height = widget.winfo_height()
         area_start = widget.count("1.0", widget.index("@0,0"))
         area_start = area_start[0] if area_start is not None else 0
@@ -331,7 +289,6 @@ class Editor(tk.Tk):
             # _ = widget.tag_configure(f"highlight-{start}-{end}", background=color)
             widget.tag_add(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
             _ = widget.tag_configure(f"highlight-{color}", background=color)
-
         parsed = parser(lexer(widget.get("1.0", tk.END)[:-1]))
         # print(parsed)
         stack: list[RegexItem | Concat | Alt] = [parsed]
@@ -364,7 +321,6 @@ class Editor(tk.Tk):
                     stack.extend(current.concats)
                     for index in range(1, len(current.concats)):
                         highlight_text_widget(current.concats[index-1].end, current.concats[index].start, "lightblue")
-
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         Editor().mainloop()
