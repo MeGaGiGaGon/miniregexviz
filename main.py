@@ -1,5 +1,8 @@
+import gui
+
+
 def main():
-    print("Hello from miniregexviz!")
+    gui.Editor().mainloop()
 
 
 if __name__ == "__main__":
