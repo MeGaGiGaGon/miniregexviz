@@ -1,8 +1,8 @@
-import gui
+from src.gui import Editor
 
 
 def main():
-    gui.Editor().mainloop()
+    Editor().mainloop()
 
 
 if __name__ == "__main__":

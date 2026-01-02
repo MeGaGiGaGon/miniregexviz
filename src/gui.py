@@ -5,8 +5,16 @@ A basic tkinter gui, currently supports simple syntax highlighting on an input r
 import tkinter as tk
 from typing import final
 
-from lexer_parser import to_regex_ast
-from regex_ast import Alt, Concat, Group, RegexError, RegexItem, RegexLiteral, Repeat
+from src.lexer_parser import to_regex_ast
+from src.regex_ast import (
+    Alt,
+    Concat,
+    Group,
+    RegexError,
+    RegexItem,
+    RegexLiteral,
+    Repeat,
+)
 
 
 @final
