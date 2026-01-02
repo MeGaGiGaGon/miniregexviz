@@ -1,80 +1,56 @@
-from collections.abc import Sequence
+import string
 from dataclasses import dataclass
-from typing import Any, Never, Self
-
-def main():
-    print("Hello from parser-3!")
-
-if __name__ == "__main__":
-    main()
-class Ok[T]:
-    def __init__(self, value: T):
-        self._value: T = value
-class Err[E]:
-    def __init__(self, value: E):
-        self._value: E = value
-class Skip: ...
-# type Result[T, E] = Ok[T] | Err[E]
-# type ParserOutput[I, O, E] = Ok[tuple[Sequence[I], O]] | Err[E] | Skip
-type ParserOutput[I, O, E] = tuple[Sequence[I], Ok[O] | Err[E]] | Skip
-@dataclass(frozen=True)
-class Dot:
-    @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, Never]:
-        if input and input[0] == ".":
-            return input[1:], Ok(cls())
-            # return Ok((input[1:], cls()))
-        else:
-            return Skip()
-@dataclass(frozen=True)
-class Caret:
-    @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, Never]:
-        if input and input[0] == "^":
-            return input[1:], Ok(cls())
-            # return Ok((input[1:], cls()))
-        else:
-            return Skip()
-@dataclass(frozen=True)
-class Dollar:
-    @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, Never]:
-        if input and input[0] == "$":
-            return input[1:], Ok(cls())
-            # return Ok((input[1:], cls()))
-        else:
-            return Skip()
-@dataclass(frozen=True)
-class RegexError:
-    message: str
-Repeatable = RegexError | Dot | Caret | Dollar
-@dataclass(frozen=True)
-class Star:
-    repeated: Repeatable
-    @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, RegexError]:
-        repeated = Regex.parse(input)
-        if input and input[0] == "*":
-            if isinstance(repeated, Repeatable):
-                return input[1:], Ok(cls(repeated))
-                # return Ok((input[1:]))
+from collections.abc import Callable, Sequence
+from typing import assert_type, overload, reveal_type, Self
+class Parser[I, O]:
+    def __init__(self, processor: Callable[[Sequence[I]], tuple[Sequence[I], O]]):
+        self._processor: Callable[[Sequence[I]], tuple[Sequence[I], O]] = processor
+    def parse(self, input: Sequence[I]) -> tuple[Sequence[I], O]:
+        return self._processor(input)
+    
+    def map[U](self: Parser[I, O | None], mapper: Callable[[O], U]) -> Parser[I, U | None]:
+        def inner(input: Sequence[I]) -> tuple[Sequence[I], U | None]:
+            input, result = self._processor(input)
+            if result is None:
+                return input, None
             else:
-                return input[1:], 
+                return input, mapper(result)
+        return Parser(inner)
+    def spanned(self) -> Parser[I, tuple[int, O]]:
+        def inner(input: Sequence[I]) -> tuple[Sequence[I], tuple[int, O]]:
+            l = len(input)
+            input, result = self._processor(input)
+            return input, (l - len(input), result)
+        return Parser(inner)
+def just[I](item: I) -> Parser[I, I | None]:
+    def inner(input: Sequence[I]) -> tuple[Sequence[I], I | None]:
+        if input[0] == item:
+            return input[1:], item
         else:
-            return Skip()
-@dataclass(frozen=True)
-class Plus:
-    repeated: Repeatable
+            return input, None
+    return Parser(inner)
+def any_of[I](items: Sequence[I]) -> Parser[I, I | None]:
+    def inner(input: Sequence[I]) -> tuple[Sequence[I], I | None]:
+        if input[0] in items:
+            return input[1:], input[0]
+        else:
+            return input, None
+    return Parser(inner)
+@dataclass
+class RegexLiteral:
+    char: str
     @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, RegexError]:
-        repeated = Regex.parse(input)
-        if input and input[0] == "+":
-            if isinstance(repeated, Repeatable):
-                return input[1:], Ok(cls(repeated))
-                # return Ok((input[1:]))
-        else:
-            return Skip()
+    def parser(cls) -> Parser[str, Self | None]:
+        return Parser[str, str].map(any_of(string.ascii_letters), cls)
+@dataclass
+class RegexError:
+    data: Regex | None
+    message: str
+    @classmethod
+    def parser(cls)
+@dataclass
+class Repeat:
+    repeated: Regex
+@dataclass
 class Regex:
-    @classmethod
-    def parse(cls, input: Sequence[str]) -> ParserOutput[str, Self, RegexError]:
-        ...
+    ...
