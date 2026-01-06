@@ -1,5 +1,11 @@
 """
-Todo.
+The plan:
+Convert the AST to a flat representation
+Use that flat representation to convert to matcher since they are closer
+
+(x+)+y
+
+
 """
 
 from dataclasses import dataclass
@@ -12,25 +18,9 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class MatchLiteral:
-    char: str
-    matches: int | bool
-    fails: int | bool
-
-@dataclass
-class Split:
-    greedy: int | bool
-    lazy: int | bool
-
-@dataclass
-class Progress:
-    index: int
-    matches: int | bool
-    fails: int | bool
-
-@dataclass
-class Simple:
-    next: int | bool
+class MatchToken:
+    regex: Regex
+    extra_data: object
 
 type Matcher = MatchLiteral | Split | Progress | Simple
 
