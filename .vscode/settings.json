@@ -1,3 +1,4 @@
 {
-    "files.eol": "\r\n"
+    "files.eol": "\r\n",  // Git default line endings
+    "basedpyright.analysis.autoSearchPaths": false,  // This should be false to prevent imports from using the wrong form
 }
