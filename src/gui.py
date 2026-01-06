@@ -58,7 +58,7 @@ class Editor(tk.Tk):
             match current:
                 case Group():
                     highlight_text_widget(current.start, current.contents.start, "lightgreen")
-                    stack.append(current.contents)
+                    stack.extend(current.contents.concats)
                     highlight_text_widget(current.contents.end, current.end, "lightgreen")
                 case Repeat():
                     stack.append(current.repeated)
