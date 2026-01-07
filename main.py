@@ -36,8 +36,14 @@ if __name__ == "__main__":
             for index, regex in enumerate(parse(regex_source)):
                 print(index, regex)
         case ["match", regex_source, target, *rest] if (len(rest) == 1 and (start:=int(rest[0]))) or len(rest) == (start:=0):
-            print(matches(parse(regex_source), target, start))
+            group_info, debug = matches(parse(regex_source), target, start)
+            print(group_info)
+            print()
+            print("\n".join(debug))
         case ["scan", regex_source, target, *rest] if (len(rest) == 1 and (start:=int(rest[0]))) or len(rest) == (start:=0):
-            print(scan(parse(regex_source), target, start))
+            group_info, debug = scan(parse(regex_source), target, start)
+            print(group_info)
+            print()
+            print("\n".join(debug))
         case _:
             print(__doc__)
