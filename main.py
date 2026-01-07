@@ -1,6 +1,7 @@
 """
 Usage:
 main.py: run gui
+main.py help: Show this message
 main.py parse "regex": print parsed result of "regex"
 main.py match "regex" "data" start?: print where the index regex matches data till, starting at start
 main.py scan "regex" "data" start?: print where the index regex matches data till, scanning from start
