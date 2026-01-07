@@ -110,5 +110,8 @@ class Editor(tk.Tk):
             if result is None:
                 break
             highlight_text_widget(result[0], result[1], colors[color])
-            starting_index = result[1]
+            if result[1] > starting_index:
+                starting_index = result[1]
+            else:
+                starting_index += 1
             color = not color
