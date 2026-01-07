@@ -44,6 +44,7 @@ def parse(source: str) -> Sequence[Regex]:
         | tuple[Literal["AltEnd"], int]
     ] = [("Alt", 0, [], 0)]
     progress_index: int = 1
+    group_index: int = 0
 
     def get_alt_safe(pop: bool) -> tuple[int, int, list[int], int]:
         alt_index = alt_stack.pop() if pop else alt_stack[-1]
@@ -84,8 +85,9 @@ def parse(source: str) -> Sequence[Regex]:
                 output.append(RegexError(source_index, source_index + 1, source, "Unopened group"))
             else:
                 group_start, start = get_group_safe(True)
-                output.append(GroupEnd(source_index, source_index + 1, source, group_start))
-                output[group_start] = GroupStart(start, start + 1, source)
+                output.append(GroupEnd(source_index, source_index + 1, source, group_start, group_index))
+                output[group_start] = GroupStart(start, start + 1, source, group_index)
+                group_index += 1
                 alt_index, start, option_indexes, progress = get_alt_safe(True)
                 output[alt_index] = Alt(start, source_index, source, option_indexes, progress)
                 fix_alt_ends(option_indexes)

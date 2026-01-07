@@ -28,20 +28,24 @@ class Editor(tk.Tk):
         _ = self.entry_frame.grid_rowconfigure(0, weight=1)
         _ = self.entry_frame.grid_rowconfigure(1, weight=1)
         _ = self.entry_frame.grid_columnconfigure(0, weight=1)
+        _ = self.entry_frame.grid_columnconfigure(1, weight=1)
+
         self.regex_place = tk.Text(self.entry_frame)
         self.regex_place.grid(column=0, row=0, sticky="NSEW")
         _ = self.regex_place.bind("<KeyRelease>", self.highlight_text)
         _ = self.regex_place.bind("<MouseWheel>", self.highlight_text)
+
         self.matches_place = tk.Text(self.entry_frame)
         self.matches_place.grid(column=0, row=1, sticky="NSEW")
         _ = self.matches_place.bind("<KeyRelease>", self.update_matches)
         _ = self.matches_place.bind("<MouseWheel>", self.update_matches)
+
         self.entry_frame.pack(side="left", anchor="nw", expand=False)
         self.regex_text = ""
         self.parsed = parse(self.regex_text)
         self.matches_text = ""
 
-    def highlight_text(self, _: tk.Event | None = None):
+    def highlight_text(self, _event: tk.Event | None = None):
         widget = self.regex_place
 
         for tag in widget.tag_names(index=None):
@@ -64,6 +68,7 @@ class Editor(tk.Tk):
         self.regex_text = self.regex_place.get("1.0", tk.END)[:-1]
         self.parsed = parse(self.regex_text)
 
+
         for current in self.parsed:
             match current:
                 case GroupStart() | GroupEnd():
@@ -80,7 +85,7 @@ class Editor(tk.Tk):
 
         self.update_matches()
 
-    def update_matches(self, _: tk.Event | None = None):
+    def update_matches(self, _event: tk.Event | None = None):
         widget = self.matches_place
 
         for tag in widget.tag_names(index=None):
@@ -102,16 +107,26 @@ class Editor(tk.Tk):
 
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
-        colors= ["SteelBlue1", "DodgerBlue2"]
-        color = 1
+        blue_colors= ["SteelBlue1", "DodgerBlue2"]
+        green_colors= ["OliveDrab2", "chartreuse2"]
+        blue_color = 0
+        green_color = 0
 
         while True:
             result = scan(self.parsed, self.matches_text, starting_index)
             if result is None:
                 break
-            highlight_text_widget(result[0], result[1], colors[color])
-            if result[1] > starting_index:
-                starting_index = result[1]
-            else:
-                starting_index += 1
-            color = not color
+            match result:
+                case [(match_start, new_start), *_]:
+                    if new_start > starting_index:
+                        starting_index = new_start
+                    else:
+                        starting_index += 1
+                    highlight_text_widget(match_start, new_start, blue_colors[blue_color])
+                    blue_color = not blue_color
+                case _:
+                    raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
+            for group in result[1:]:
+                if isinstance(group, tuple):
+                    highlight_text_widget(group[0], group[1], green_colors[green_color])
+                    green_color = not green_color

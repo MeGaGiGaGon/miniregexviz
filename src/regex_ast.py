@@ -51,6 +51,7 @@ class GroupStart(Spanned):
     """
     The start of a group, used for tracking where repeats should point.
     """
+    group_index: int
 
 @dataclass(frozen=True)
 class GroupEnd(Spanned):
@@ -58,6 +59,7 @@ class GroupEnd(Spanned):
     The end of a group, used for tracking where repeats should point.
     """
     group_start: int
+    group_index: int
 
 @dataclass(frozen=True)
 class RepeatEnd(Spanned):
