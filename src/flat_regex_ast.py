@@ -122,6 +122,13 @@ def parse(source: str) -> Sequence[Regex]:
             case _:
                 raise RuntimeError("Internal Error: Index in group_stack did not correspond to an in progress group in output list")
 
+    def fix_alt_ends(option_indexes: list[RegexIndex]):
+        for index in option_indexes:
+            match output[index - 1]:
+                case ("AltEnd", start):
+                    output[index - 1] = AltEnd(start, SourceIndex(start + 1), source, RegexIndex(len(output)))
+                case _:
+                    raise RuntimeError("Internal Error: Index in alt options did not correspond to an alt end")
 
     for char in source:
         if char == "(":
@@ -142,12 +149,7 @@ def parse(source: str) -> Sequence[Regex]:
                 output[group_start] = GroupStart(start, SourceIndex(start + 1), source)
                 alt_index, start, option_indexes, progress = get_alt_safe(True)
                 output[alt_index] = Alt(start, SourceIndex(source_index), source, option_indexes, progress)
-                for index in range(alt_index, len(output)):
-                    match output[index]:
-                        case ("AltEnd", start):
-                            output[index] = AltEnd(start, SourceIndex(start + 1), source, RegexIndex(len(output)))
-                        case _:
-                            pass
+                fix_alt_ends(option_indexes)
         elif char == "+":
             match output[-1]:
                 case ReLiteral(start):
@@ -165,12 +167,7 @@ def parse(source: str) -> Sequence[Regex]:
             output[group_index] = ReError(start, SourceIndex(start + 1), source, "Unclosed Group")
         alt_index, start, option_indexes, progress = get_alt_safe(True)
         output[alt_index] = Alt(start, SourceIndex(source_index + 1), source, option_indexes, progress)
-        for index in range(alt_index, len(output)):
-            match output[index]:
-                case ("AltEnd", start):
-                    output[index] = AltEnd(start, SourceIndex(start + 1), source, RegexIndex(len(output)))
-                case _:
-                    pass
+        fix_alt_ends(option_indexes)
     output.append(EOF(SourceIndex(source_index - 1), SourceIndex(source_index - 1), source))
     if is_regex_sequence(output):
         return output
@@ -225,5 +222,5 @@ def matches(regex: Sequence[Regex], against: str) -> int | None:
             case ReError():
                 return False
 
-# print(*enumerate(parse("(x|y+|z|(|)+)+")), sep="\n")
+print(*enumerate(parse("a|")), sep="\n")
 print(matches(parse("(x+)+y"), "xx"))
