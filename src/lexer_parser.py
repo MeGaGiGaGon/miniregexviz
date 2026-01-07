@@ -1,5 +1,7 @@
 """
 The lexer and parser for turning a string into a regex AST.
+
+Currently just a parser since the lexer is not needed yet.
 """
 
 
