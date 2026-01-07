@@ -102,10 +102,13 @@ class Editor(tk.Tk):
 
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
+        colors= ["SteelBlue1", "DodgerBlue2"]
+        color = 1
 
         while True:
             result = scan(self.parsed, self.matches_text, starting_index)
             if result is None:
                 break
-            highlight_text_widget(result[0], result[1], "lightblue")
+            highlight_text_widget(result[0], result[1], colors[color])
             starting_index = result[1]
+            color = not color
