@@ -21,3 +21,8 @@ ignore = [
 dev = [
     "ty>=0.0.9",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"main.py" = [
+    "T201", "T100"  # Ignore these in main since print and breakpoint are needed for the CLI to work
+]

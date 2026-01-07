@@ -9,6 +9,7 @@ Add --pdb to drop into debugger on run
 """
 
 import sys
+
 from src.gui import Editor
 from src.lexer_parser import parse
 from src.matcher import matches, scan
