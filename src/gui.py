@@ -54,6 +54,8 @@ class Editor(tk.Tk):
         self.parsed = parse(self.regex_text)
         self.matches_text = ""
 
+        self.highlight_text()  # Run highlight so that the ast and match outputs are not empty
+
     def highlight_text(self, _event: tk.Event | None = None):
         widget = self.regex_place
 
@@ -124,6 +126,7 @@ class Editor(tk.Tk):
 
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
+
         blue_colors= ["SteelBlue1", "DodgerBlue2"]
         green_colors= ["OliveDrab2", "chartreuse3"]
         blue_color = 0
@@ -149,6 +152,9 @@ class Editor(tk.Tk):
                     blue_color = not blue_color
                 case _:
                     raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
+
+        if not debug_output:
+            debug_output = ["No text to match against"]
 
         _ = self.match_debug.configure(state="normal")
         _ = self.match_debug.delete("1.0", tk.END)
