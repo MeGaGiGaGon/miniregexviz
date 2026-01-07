@@ -5,6 +5,7 @@ A basic implementation of tooling for a super minimal regex language.
 ## Installation
 
 This project uses uv. If you do not have it installed, see:
+
 https://docs.astral.sh/uv/#installation
 
 ```powershell
@@ -27,15 +28,21 @@ Add --pdb to drop into debugger on run
 ## MiniRegex Specification
 
 `|`: Adds a new alternation to the current scope. `a|b` will first try to match `a`, and then `b` if `a` fails.
+
 `(` and `)`: Makes a new group. The enclosed contents are a new scope, that is a seperate from the outer one the group is part of. Matches if the contents match.
+
 `+`: Greedily repeats the targeted item. Requires the target to match at least once. Valid repeat targets are literals and groups.
+
 Any other character is treated as a literal, that matches if the character at the current index being matched equals it.
 
 ## GUI Info
 
 The top left panel is for inputing the regex.
+
 The top right panel shows the AST for that regex.
+
 The bottom right panel is for inputing text to match against.
+
 The bottom left panel shows the matching debug output.
 
 ## Why
