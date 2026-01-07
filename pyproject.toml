@@ -16,3 +16,8 @@ ignore = [
     "ERA001",  # Still in-dev
     "A002",  # I like shadowing input
 ]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.9",
+]
