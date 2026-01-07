@@ -16,12 +16,14 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def matches(regex: Sequence[Regex], against: str) -> int | None:
+def matches(regex: Sequence[Regex], against: str, against_index: int) -> int | None:
+    """
+    Test if the regex matches starting at an index, returning the index matched to if yes, otherwise None.
+    """
     backtracking_stack: list[tuple[int, int, list[int | None]]] = []
     progress_trackers: list[int | None] = [None for r in regex if isinstance(r, Alt)]
     regex_index: int = 0
     regex_length = len(regex)
-    against_index = 0
     against_length = len(against)
 
     def inc():
@@ -60,3 +62,15 @@ def matches(regex: Sequence[Regex], against: str) -> int | None:
                 inc()
             case RegexError():
                 return None
+
+def scan(regex: Sequence[Regex], against: str, starting_index: int) -> tuple[int, int] | None:
+    """
+    Try to match the regex starting from the starting index. Returns the starting index and index matched until if success, otherwise None.
+    """
+
+    against_length = len(against)
+    while starting_index < against_length:
+        if (matched_till := matches(regex, against, starting_index)) is not None:
+            return starting_index, matched_till
+        starting_index += 1
+    return None
