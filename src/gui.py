@@ -5,15 +5,16 @@ A basic tkinter gui, currently supports simple syntax highlighting on an input r
 import tkinter as tk
 from typing import final
 
-from src.lexer_parser import to_regex_ast
+from src.lexer_parser import parse
 from src.regex_ast import (
+    EOF,
     Alt,
-    Concat,
-    Group,
+    AltEnd,
+    GroupEnd,
+    GroupStart,
     RegexError,
-    RegexItem,
     RegexLiteral,
-    Repeat,
+    RepeatEnd,
 )
 
 
@@ -50,33 +51,18 @@ class Editor(tk.Tk):
             widget.tag_add(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
             _ = widget.tag_configure(f"highlight-{color}", background=color)
 
-        parsed = to_regex_ast(widget.get("1.0", tk.END)[:-1])
+        parsed = parse(widget.get("1.0", tk.END)[:-1])
 
-        stack: list[RegexItem | Concat | Alt] = [parsed]
-        while stack:
-            current = stack.pop()
+        for current in parsed:
             match current:
-                case Group():
-                    highlight_text_widget(current.start, current.contents.start, "lightgreen")
-                    stack.extend(current.contents.concats)
-                    highlight_text_widget(current.contents.end, current.end, "lightgreen")
-                case Repeat():
-                    stack.append(current.repeated)
-                    highlight_text_widget(current.repeated.end, current.end, "lightblue")
-                case RegexLiteral():
+                case GroupStart() | GroupEnd():
+                    highlight_text_widget(current.start, current.start + 1, "lightgreen")
+                case RepeatEnd():
+                    highlight_text_widget(current.end - 1, current.end, "lightblue")
+                case RegexLiteral() | AltEnd() | EOF():
                     pass
                 case RegexError():
-                    if current.inner is not None:
-                        stack.append(current.inner)
-                        if current.start != current.inner.start:
-                            highlight_text_widget(current.start, current.inner.start, "pale violet red")
-                        if current.inner.end != current.end:
-                            highlight_text_widget(current.inner.end, current.end, "pale violet red")
-                    else:
-                        highlight_text_widget(current.start, current.end, "pale violet red")
-                case Concat():
-                    stack.extend(current.regexes)
-                case Alt():
-                    stack.extend(current.concats)
-                    for index in range(1, len(current.concats)):
-                        highlight_text_widget(current.concats[index-1].end, current.concats[index].start, "lightblue")
+                    highlight_text_widget(current.start, current.end, "pale violet red")
+                case Alt(option_indexes=option_indexes):
+                    for index in option_indexes:
+                        highlight_text_widget(parsed[index].start - 1, parsed[index].start, "lightblue")

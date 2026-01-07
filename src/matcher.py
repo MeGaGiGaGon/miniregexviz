@@ -1,87 +1,62 @@
-"""
-The plan:
-Convert the AST to a flat representation
-Use that flat representation to convert to matcher since they are closer
-
-(x+)+y
-
-
-"""
-
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from src.regex_ast import Alt, Concat, Group, Regex, RegexError, RegexLiteral, Repeat
+from src.regex_ast import (
+    EOF,
+    Alt,
+    AltEnd,
+    GroupEnd,
+    GroupStart,
+    Regex,
+    RegexError,
+    RegexLiteral,
+    RepeatEnd,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-@dataclass
-class MatchToken:
-    regex: Regex
-    extra_data: object
+def matches(regex: Sequence[Regex], against: str) -> int | None:
+    backtracking_stack: list[tuple[int, int, list[int | None]]] = []
+    progress_trackers: list[int | None] = [None for r in regex if isinstance(r, Alt)]
+    regex_index: int = 0
+    regex_length = len(regex)
+    against_index = 0
+    against_length = len(against)
 
-type Matcher = MatchLiteral | Split | Progress | Simple
+    def inc():
+        nonlocal regex_index
+        regex_index += 1
 
-
-def to_matcher(regex: Regex) -> Sequence[Matcher]:
-    """
-    Transform any regex item into a matcher.
-    """
-    match regex:
-        case Alt():
-            return alt_to_matcher(regex)
-        case Group():
-            return alt_to_matcher(regex.contents)
-        case Repeat() | Concat():
-            raise NotImplementedError
-        case RegexLiteral():
-            return [MatchLiteral(regex.char, True, False)]
-        case RegexError():
-            return [Simple(False)]
-
-
-
-def alt_to_matcher(alt: Alt) -> Sequence[Matcher]:
-    if len(alt.concats) == 0:
-        return [Progress(0, True, False)]
-    elif len(alt.concats) == 1:
-        return [Progress(0, concat_to_matcher(alt.concats[0]), False)]
-        return cls(("progress", 0), cls.concat_to_matcher(alt.concats[0]), False)
-    progress = cls(("progress", 0), cls(alt, cls.concat_to_matcher(alt.concats[-2]), cls.concat_to_matcher(alt.concats[-1])), False)
-    for concat in alt.concats[:-2][::-1]:
-        progress.left = cls(alt, cls.concat_to_matcher(concat), progress.left)
-    return progress
-
-def replace_trues_with(self, index: int) -> Sequence[Matcher]:
-    stack: list[Self] = [self]
-    seen = set[int]()
-
-    while stack:
-        current = stack.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-        
-        if current.left is True:
-            current.left = item
-        elif current.left is not False:
-            stack.append(current.left)
-
-        if current.right is True:
-            current.right = item
-        elif current.right is not False:
-            stack.append(current.right)
-
-
-def concat_to_matcher(concat: Concat) -> Sequence[Matcher]:
-    if not concat.regexes:
-        return cls(concat, True, True)
-    result = current = cls.to_matcher(concat.regexes[0])
-    for item in concat.regexes[1:]:
-        item = cls.to_matcher(item)
-        current.replace_trues_with(item)
-        current = item
-    return result
-
+    while True:
+        if regex_index >= regex_length:
+            return against_index
+        match regex[regex_index]:
+            case RegexLiteral(char=char):
+                if against_index < against_length and char == against[against_index]:
+                    inc()
+                    against_index += 1
+                elif backtracking_stack:
+                    regex_index, against_index, progress_trackers = backtracking_stack.pop()
+                else:
+                    return None
+            case Alt(option_indexes=option_indexes, progress_index=progress_index):
+                last_progress = progress_trackers[progress_index]
+                if last_progress is None or last_progress < against_index:
+                    progress_trackers[progress_index] = against_index
+                    inc()
+                    backtracking_stack.extend((option, against_index, progress_trackers[::]) for option in option_indexes[::-1])
+                elif backtracking_stack:
+                    regex_index, against_index, progress_trackers = backtracking_stack.pop()
+                else:
+                    return None
+            case AltEnd(jump_to=jump_to):
+                regex_index = jump_to
+            case RepeatEnd(repeat_start=repeat_start):
+                inc()
+                backtracking_stack.append((regex_index, against_index, progress_trackers[::]))
+                regex_index = repeat_start
+            case GroupStart() | GroupEnd() | EOF():
+                inc()
+            case RegexError():
+                return None

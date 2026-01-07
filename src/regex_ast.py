@@ -4,7 +4,7 @@ Types representing the regex AST.
 
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -19,10 +19,6 @@ class Spanned:
     start: int
     end: int
     source: str
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.__class__.__name__}_{self.start}_{self.end}_{self.source[self.start:self.end]}"
 
     @property
     def length(self) -> int:
@@ -40,37 +36,57 @@ class Alt(Spanned):
     """
     A series of concatenations to be tried until the first matches.
     """
-    concats: Sequence[Concat]
+    option_indexes: Sequence[int]
+    progress_index: int
 
 @dataclass(frozen=True)
-class Concat(Spanned):
+class AltEnd(Spanned):
     """
-    A list of regex items that matches if all the items match in sequence.
+    The end of one Alt concatenation.
     """
-    regexes: Sequence[RegexItem]
+    jump_to: int
 
 @dataclass(frozen=True)
-class Group(Spanned):
+class GroupStart(Spanned):
     """
-    Both allows for repeating an alternation, and later capturing specific contents.
+    The start of a group, used for tracking where repeats should point.
     """
-    contents: Alt
 
 @dataclass(frozen=True)
-class Repeat(Spanned):
+class GroupEnd(Spanned):
     """
-    Greedilly repeats the repeated, matches if repeated matches at least once.
+    The end of a group, used for tracking where repeats should point.
     """
-    repeated: Repeatable
+    group_start: int
+
+@dataclass(frozen=True)
+class RepeatEnd(Spanned):
+    """
+    The end of a greedy repeat, matches if the repeated matched at least once.
+    """
+    repeat_start: int
 
 @dataclass(frozen=True)
 class RegexError(Spanned):
     """
     Never matches, produced if input has errors.
     """
-    inner: RegexItem | None | Alt
     message: str
 
-Repeatable = Group | RegexLiteral | RegexError
-type RegexItem = Group | Repeat | RegexLiteral | RegexError
-type Regex = Alt | Concat | RegexItem
+@dataclass(frozen=True)
+class EOF(Spanned):
+    """
+    Represents the end of the input, used to have a valid end index to point to.
+    """
+
+type Regex = (
+    RegexLiteral
+    | Alt
+    | AltEnd
+    | RepeatEnd
+    | GroupStart
+    | GroupEnd
+    | RegexError
+    | EOF
+)
+

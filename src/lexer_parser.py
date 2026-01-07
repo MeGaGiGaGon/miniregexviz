@@ -3,17 +3,18 @@ The lexer and parser for turning a string into a regex AST.
 """
 
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypeGuard
 
 from src.regex_ast import (
+    EOF,
     Alt,
-    Concat,
-    Group,
+    AltEnd,
+    GroupEnd,
+    GroupStart,
+    Regex,
     RegexError,
-    RegexItem,
     RegexLiteral,
-    Repeat,
-    Repeatable,
+    RepeatEnd,
 )
 
 if TYPE_CHECKING:
@@ -27,94 +28,85 @@ class TokenPlus: ...
 
 type Token = TokenGroupStart | TokenGroupEnd | TokenAltSep | RegexLiteral | TokenPlus
 
-def lexer(input: str) -> Sequence[Token]:
-    """
-    Takes in an input string and returns the tokenized token sequence.
-    """
-    index = 0
-    length = len(input)
-    output: list[Token] = []
-    while index < length:
-        char = input[index]
+def is_regex_sequence(data: Sequence[object]) -> TypeGuard[Sequence[Regex]]:
+    return all(isinstance(x, Regex.__value__) for x in data)  # pyright: ignore[reportAny]
+
+def parse(source: str) -> Sequence[Regex]:
+    alt_stack: list[int] = [0]
+    group_stack: list[int] = []
+    source_index: int = 0
+    output: list[
+        Regex
+        | tuple[Literal["Group"], int]
+        | tuple[Literal["Alt"], int, list[int], int]
+        | tuple[Literal["AltEnd"], int]
+    ] = [("Alt", 0, [], 0)]
+    progress_index: int = 1
+
+    def get_alt_safe(pop: bool) -> tuple[int, int, list[int], int]:
+        alt_index = alt_stack.pop() if pop else alt_stack[-1]
+        match output[alt_index]:
+            case ("Alt", start, option_indexes, progress):
+                return alt_index, start, option_indexes, progress
+            case _:
+                raise RuntimeError("Internal Error: Index in alt_stack did not correspond to an in progress alt in output list")
+
+    def get_group_safe(pop: bool) -> tuple[int, int]:
+        group_index = group_stack.pop() if pop else group_stack[-1]
+        match output[group_index]:
+            case ("Group", start):
+                return group_index, start
+            case _:
+                raise RuntimeError("Internal Error: Index in group_stack did not correspond to an in progress group in output list")
+
+    def fix_alt_ends(option_indexes: list[int]):
+        for index in option_indexes:
+            match output[index - 1]:
+                case ("AltEnd", start):
+                    output[index - 1] = AltEnd(start, int(start + 1), source, len(output))
+                case _:
+                    raise RuntimeError("Internal Error: Index in alt options did not correspond to an alt end")
+
+    for char in source:
         if char == "(":
-            output.append(TokenGroupStart())
-        elif char == ")":
-            output.append(TokenGroupEnd())
+            group_stack.append(len(output))
+            output.append(("Group", source_index))
+            alt_stack.append(len(output))
+            output.append(("Alt", source_index + 1, [], progress_index))
+            progress_index += 1
         elif char == "|":
-            output.append(TokenAltSep())
+            get_alt_safe(False)[2].append(len(output) + 1)
+            output.append(("AltEnd", source_index))
+        elif char == ")":
+            if not group_stack:
+                output.append(RegexError(source_index, source_index + 1, source, "Unopened group"))
+            else:
+                group_start, start = get_group_safe(True)
+                output.append(GroupEnd(source_index, source_index + 1, source, group_start))
+                output[group_start] = GroupStart(start, start + 1, source)
+                alt_index, start, option_indexes, progress = get_alt_safe(True)
+                output[alt_index] = Alt(start, source_index, source, option_indexes, progress)
+                fix_alt_ends(option_indexes)
         elif char == "+":
-            output.append(TokenPlus())
+            match output[-1]:
+                case RegexLiteral(start):
+                    output.append(RepeatEnd(start, source_index + 1, source, len(output)-1))
+                case GroupEnd(start, group_start=group_start):
+                    output.append(RepeatEnd(start, source_index + 1, source, group_start))
+                case _:
+                    output.append(RegexError(source_index, source_index + 1, source, "Unrepeatable item"))
         else:
-            output.append(RegexLiteral(index, index + 1, input, input[index]))
-        index += 1
-    return output
-
-def parser(tokens: Sequence[Token], source: str) -> Alt:
-    """
-    Takes in a sequence of tokens and returns the AST representing the regex.
-    """
-    index = 0
-    span_index = 0
-    group_stack: list[tuple[list[Concat], list[RegexItem], int]] = []
-    length = len(tokens)
-    concat_storage: list[Concat] = []
-    current_concat: list[RegexItem] = []
-
-    def push_current_concat_to_storage():
-        nonlocal concat_storage, current_concat, span_index
-        if len(current_concat) > 0:
-            concat_storage.append(Concat(current_concat[0].start, current_concat[-1].end, source, current_concat))
-        else:
-            concat_storage.append(Concat(span_index, span_index, source, current_concat))
-        current_concat = []
-
-    while index < length:
-        match tokens[index]:
-            case RegexLiteral() as literal:
-                current_concat.append(literal)
-                span_index += literal.length
-            case TokenPlus():
-                if len(current_concat) > 0:
-                    for_inspection = current_concat.pop()
-                    if isinstance(for_inspection, Repeatable):
-                        current_concat.append(Repeat(for_inspection.start, for_inspection.end + 1, source, for_inspection))
-                    else:
-                        current_concat.append(for_inspection)
-                        current_concat.append(RegexError(span_index, span_index + 1, source, None, "Repeat with invalid element to repeat"))
-                else:
-                    current_concat.append(RegexError(span_index, span_index + 1, source, None, "Repeat with nothing to repeat"))
-                span_index += 1
-            case TokenAltSep():
-                push_current_concat_to_storage()
-                span_index += 1
-            case TokenGroupStart():
-                group_stack.append((concat_storage, current_concat, span_index))
-                concat_storage = []
-                current_concat = []
-                span_index += 1
-            case TokenGroupEnd():
-                if not group_stack:
-                    current_concat.append(RegexError(span_index, span_index + 1, source, None, "Unopened group"))
-                    span_index += 1
-                else:
-                    push_current_concat_to_storage()
-                    stored_concat_storage, stored_current_concat, stored_span_index = group_stack.pop()
-                    stored_current_concat.append(Group(stored_span_index, span_index + 1, source, Alt(concat_storage[0].start, concat_storage[-1].end, source, concat_storage)))
-                    concat_storage = stored_concat_storage
-                    current_concat = stored_current_concat
-                    span_index += 1
-        index += 1
-    push_current_concat_to_storage()
-    while group_stack:
-        stored_concat_storage, stored_current_concat, stored_span_index = group_stack.pop()
-        stored_current_concat.append(RegexError(stored_span_index, span_index, source, Alt(concat_storage[0].start, concat_storage[-1].end, source, concat_storage), "Unclosed group"))
-        concat_storage = stored_concat_storage
-        current_concat = stored_current_concat
-        push_current_concat_to_storage()
-    return Alt(concat_storage[0].start, concat_storage[-1].end, source, concat_storage)
-
-def to_regex_ast(input: str) -> Alt:
-    """
-    Convenience method for converting an input directly to its AST.
-    """
-    return parser(lexer(input), input)
+            output.append(RegexLiteral(source_index, source_index + 1, source, char))
+        source_index = source_index + 1
+    while alt_stack:
+        if group_stack:
+            group_index, start = get_group_safe(True)
+            output[group_index] = RegexError(start, start + 1, source, "Unclosed Group")
+        alt_index, start, option_indexes, progress = get_alt_safe(True)
+        output[alt_index] = Alt(start, source_index + 1, source, option_indexes, progress)
+        fix_alt_ends(option_indexes)
+    output.append(EOF(source_index, source_index, source))
+    if is_regex_sequence(output):
+        return output
+    else:
+        raise ValueError(f"Internal Error: Parser output has unfixed temporary values\n{output}")

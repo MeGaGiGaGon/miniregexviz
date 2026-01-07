@@ -200,7 +200,7 @@ def matches(regex: Sequence[Regex], against: str) -> int | None:
                 elif backtracking_stack:
                     regex_index, against_index, progress_trackers = backtracking_stack.pop()
                 else:
-                    return False
+                    return None
             case Alt(option_indexes=option_indexes, progress_index=progress_index):
                 last_progress = progress_trackers[progress_index]
                 if last_progress is None or last_progress < against_index:
@@ -210,7 +210,7 @@ def matches(regex: Sequence[Regex], against: str) -> int | None:
                 elif backtracking_stack:
                     regex_index, against_index, progress_trackers = backtracking_stack.pop()
                 else:
-                    return False
+                    return None
             case AltEnd(jump_to=jump_to):
                 regex_index = jump_to
             case RepeatEnd(repeat_start=repeat_start):
@@ -220,7 +220,7 @@ def matches(regex: Sequence[Regex], against: str) -> int | None:
             case GroupStart() | GroupEnd() | EOF():
                 inc()
             case ReError():
-                return False
+                return None
 
 print(*enumerate(parse("a|")), sep="\n")
 print(matches(parse("(x+)+y"), "xx"))
