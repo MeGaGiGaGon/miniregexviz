@@ -124,6 +124,12 @@ class Editor(tk.Tk):
             widget.tag_add(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
             _ = widget.tag_configure(f"highlight-{color}", background=color)
 
+        def remove_highlight_text_widget(start: int, end: int, color: str):
+            # For performance, don't remove highlights that wouldn't be visible anyways
+            if (start < area_start and end < area_end) or (start > area_start and end > area_end):
+                return
+            widget.tag_remove(f"highlight-{color}", f"1.0+{start} chars", f"1.0+{end} chars")
+
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
 
@@ -138,10 +144,6 @@ class Editor(tk.Tk):
             debug_output.extend(scan_debug)
             if result is None:
                 break
-            for group in result[1:]:
-                if isinstance(group, tuple):
-                    highlight_text_widget(group[0], group[1], green_colors[green_color])
-                    green_color = not green_color
             match result:
                 case [(match_start, new_start), *_]:
                     if new_start > starting_index:
@@ -152,6 +154,13 @@ class Editor(tk.Tk):
                     blue_color = not blue_color
                 case _:
                     raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
+
+            for group in result[1:]:
+                if isinstance(group, tuple):
+                    highlight_text_widget(group[0], group[1], green_colors[green_color])
+                    green_color = not green_color
+                    for color in blue_colors:
+                        remove_highlight_text_widget(group[0], group[1], color)
 
         if not debug_output:
             debug_output = ["No text to match against"]
