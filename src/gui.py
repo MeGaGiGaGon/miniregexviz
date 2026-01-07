@@ -45,6 +45,10 @@ class Editor(tk.Tk):
         self.ast_display.grid(column=1, row=0, sticky="NSEW")
         _ = self.ast_display.configure(state="disabled")
 
+        self.match_debug = tk.Text(self.entry_frame)
+        self.match_debug.grid(column=1, row=1, sticky="NSEW")
+        _ = self.match_debug.configure(state="disabled")
+
         self.entry_frame.pack(side="left", anchor="nw", expand=False)
         self.regex_text = ""
         self.parsed = parse(self.regex_text)
@@ -124,9 +128,11 @@ class Editor(tk.Tk):
         green_colors= ["OliveDrab2", "chartreuse3"]
         blue_color = 0
         green_color = 0
+        debug_output: list[str] = []
 
         while True:
-            result = scan(self.parsed, self.matches_text, starting_index)
+            result, scan_debug = scan(self.parsed, self.matches_text, starting_index)
+            debug_output.extend(scan_debug)
             if result is None:
                 break
             for group in result[1:]:
@@ -143,3 +149,8 @@ class Editor(tk.Tk):
                     blue_color = not blue_color
                 case _:
                     raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
+
+        _ = self.match_debug.configure(state="normal")
+        _ = self.match_debug.delete("1.0", tk.END)
+        self.match_debug.insert("1.0", "\n".join(debug_output))
+        _ = self.match_debug.configure(state="disabled")

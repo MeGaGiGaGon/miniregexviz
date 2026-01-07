@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def matches(regex: Sequence[Regex], against: str, against_index: int) -> Sequence[int | None | tuple[int, int]] | None:
+def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[Sequence[int | None | tuple[int, int]] | None, list[str]]:
     """
     Test if the regex matches starting at an index, returning the index matched to if yes, otherwise None.
     """
@@ -27,14 +27,16 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> Sequenc
     regex_length = len(regex)
     against_length = len(against)
     starting_index = against_index
+    debug_output: list[str] = []
 
     def inc():
         nonlocal regex_index
         regex_index += 1
 
     while True:
+        debug_output.append(f"{against_index}r{regex_index} g{group_trackers} p{progress_trackers} b{backtracking_stack}")
         if regex_index >= regex_length:
-            return [(starting_index, against_index), *group_trackers]
+            return [(starting_index, against_index), *group_trackers], debug_output
         match regex[regex_index]:
             case RegexLiteral(char=char):
                 if against_index < against_length and char == against[against_index]:
@@ -43,7 +45,7 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> Sequenc
                 elif backtracking_stack:
                     regex_index, against_index, progress_trackers, group_trackers = backtracking_stack.pop()
                 else:
-                    return None
+                    return None, debug_output
             case Alt(option_indexes=option_indexes, progress_index=progress_index):
                 last_progress = progress_trackers[progress_index]
                 if last_progress is None or last_progress < against_index:
@@ -53,7 +55,7 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> Sequenc
                 elif backtracking_stack:
                     regex_index, against_index, progress_trackers, group_trackers = backtracking_stack.pop()
                 else:
-                    return None
+                    return None, debug_output
             case AltEnd(jump_to=jump_to):
                 regex_index = jump_to
             case RepeatEnd(repeat_start=repeat_start):
@@ -73,16 +75,22 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> Sequenc
             case EOF():
                 inc()
             case RegexError():
-                return None
+                return None, debug_output
 
-def scan(regex: Sequence[Regex], against: str, starting_index: int) -> Sequence[int | None | tuple[int, int]] | None:
+def scan(regex: Sequence[Regex], against: str, starting_index: int) -> tuple[Sequence[int | None | tuple[int, int]] | None, list[str]]:
     """
     Try to match the regex starting from the starting index. Returns the starting index and index matched until if success, otherwise None.
     """
 
+    debug_output: list[str] = []
     against_length = len(against)
     while starting_index < against_length:
-        if (matched_till := matches(regex, against, starting_index)) is not None:
-            return matched_till
+        result, match_debug = matches(regex, against, starting_index)
+        debug_output.extend(match_debug)
+        if result is None:
+            debug_output.append(f"Matching failed at starting index {starting_index}")
+        else:
+            debug_output.append(f"Match found at starting index {starting_index}")
+            return result, debug_output
         starting_index += 1
-    return None
+    return None, debug_output
