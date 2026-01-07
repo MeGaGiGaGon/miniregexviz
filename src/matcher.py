@@ -20,9 +20,6 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> int | N
     """
     Test if the regex matches starting at an index, returning the index matched to if yes, otherwise None.
     """
-    if not regex:
-        return against_index
-
     backtracking_stack: list[tuple[int, int, list[int | None]]] = []
     progress_trackers: list[int | None] = [None for r in regex if isinstance(r, Alt)]
     regex_index: int = 0
