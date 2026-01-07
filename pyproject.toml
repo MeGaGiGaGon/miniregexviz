@@ -9,7 +9,7 @@ dependencies = []
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "E501", "PLR0912", "C901", "PLR0915",  # I like my spaghetti
+    "E501", "PLR0912", "C901", "PLR0915", "FBT001",  # I like my spaghetti
     "D",  # I'll document as I want to
     "ANN", "RET",  # Type checker will complain if I need more annotations
     "TRY003", "EM101", "FBT003", "EM102",  # Stupid rule
