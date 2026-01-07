@@ -121,7 +121,7 @@ class Editor(tk.Tk):
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
         blue_colors= ["SteelBlue1", "DodgerBlue2"]
-        green_colors= ["OliveDrab2", "chartreuse2"]
+        green_colors= ["OliveDrab2", "chartreuse3"]
         blue_color = 0
         green_color = 0
 
@@ -129,6 +129,10 @@ class Editor(tk.Tk):
             result = scan(self.parsed, self.matches_text, starting_index)
             if result is None:
                 break
+            for group in result[1:]:
+                if isinstance(group, tuple):
+                    highlight_text_widget(group[0], group[1], green_colors[green_color])
+                    green_color = not green_color
             match result:
                 case [(match_start, new_start), *_]:
                     if new_start > starting_index:
@@ -139,7 +143,3 @@ class Editor(tk.Tk):
                     blue_color = not blue_color
                 case _:
                     raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
-            for group in result[1:]:
-                if isinstance(group, tuple):
-                    highlight_text_widget(group[0], group[1], green_colors[green_color])
-                    green_color = not green_color
