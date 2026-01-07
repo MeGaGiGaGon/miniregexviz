@@ -66,7 +66,7 @@ def parse(source: str) -> Sequence[Regex]:
         for index in option_indexes:
             match output[index - 1]:
                 case ("AltEnd", start):
-                    output[index - 1] = AltEnd(start, int(start + 1), source, len(output))
+                    output[index - 1] = AltEnd(start, int(start + 1), source, len(output) - 1)
                 case _:
                     raise RuntimeError("Internal Error: Index in alt options did not correspond to an alt end")
 
