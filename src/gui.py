@@ -4,6 +4,7 @@ A basic tkinter gui, currently supports simple syntax highlighting on an input r
 
 import dataclasses
 import tkinter as tk
+from itertools import cycle
 from typing import final
 
 from src.lexer_parser import parse
@@ -91,16 +92,16 @@ class Editor(tk.Tk):
         for current in self.parsed:
             match current:
                 case GroupStart() | GroupEnd():
-                    highlight_text_widget(current.start, current.start + 1, "lightgreen")
+                    highlight_text_widget(current.start, current.start + 1, "#C5E893")
                 case RepeatEnd():
-                    highlight_text_widget(current.end - 1, current.end, "lightblue")
+                    highlight_text_widget(current.end - 1, current.end, "#C5E893")
                 case RegexLiteral() | AltEnd() | EOF():
                     pass
                 case RegexError():
-                    highlight_text_widget(current.start, current.end, "pale violet red")
+                    highlight_text_widget(current.start, current.end, "#ED9EA3")
                 case Alt(option_indexes=option_indexes):
                     for index in option_indexes:
-                        highlight_text_widget(self.parsed[index].start - 1, self.parsed[index].start, "lightblue")
+                        highlight_text_widget(self.parsed[index].start - 1, self.parsed[index].start, "#99BEFF")
 
         self.update_matches()
 
@@ -133,10 +134,9 @@ class Editor(tk.Tk):
         starting_index = 0
         self.matches_text = widget.get("1.0", tk.END)[:-1]
 
-        blue_colors= ["SteelBlue1", "DodgerBlue2"]
-        green_colors= ["OliveDrab2", "chartreuse3"]
-        blue_color = 0
-        green_color = 0
+        group_0_colors= ["#D5EBFF", "#9FCFFF"]
+        group_0_color_cycle = cycle(group_0_colors)
+        other_group_color_group_cycle = cycle([["#C4E8AC", "#F6D7A6", "#C8C8FF", "#F2CFFF"], ["#9FCBA1", "#E0BF8B", "#ACADFC", "#E1ABF5"]])
         debug_output: list[str] = []
 
         while True:
@@ -150,16 +150,15 @@ class Editor(tk.Tk):
                         starting_index = new_start
                     else:
                         starting_index += 1
-                    highlight_text_widget(match_start, new_start, blue_colors[blue_color])
-                    blue_color = not blue_color
+                    highlight_text_widget(match_start, new_start, next(group_0_color_cycle))
                 case _:
                     raise RuntimeError("Internal Error: Scan did not give a tuple as first result")
 
+            other_group_cycle = cycle(next(other_group_color_group_cycle))
             for group in result[1:]:
                 if isinstance(group, tuple):
-                    highlight_text_widget(group[0], group[1], green_colors[green_color])
-                    green_color = not green_color
-                    for color in blue_colors:
+                    highlight_text_widget(group[0], group[1], next(other_group_cycle))
+                    for color in group_0_colors:
                         remove_highlight_text_widget(group[0], group[1], color)
 
         if not debug_output:
