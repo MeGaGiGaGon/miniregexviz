@@ -22,14 +22,6 @@ from src.regex_ast import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-
-class TokenGroupStart: ...
-class TokenGroupEnd: ...
-class TokenAltSep: ...
-class TokenPlus: ...
-
-type Token = TokenGroupStart | TokenGroupEnd | TokenAltSep | RegexLiteral | TokenPlus
-
 def is_regex_sequence(data: Sequence[object]) -> TypeGuard[Sequence[Regex]]:
     return all(isinstance(x, Regex.__value__) for x in data)  # pyright: ignore[reportAny]
 
@@ -39,8 +31,8 @@ def parse(source: str) -> Sequence[Regex]:
     source_index: int = 0
     output: list[
         Regex
-        | tuple[Literal["Group"], int]
         | tuple[Literal["Alt"], int, list[int], int]
+        | tuple[Literal["Group"], int]
         | tuple[Literal["AltEnd"], int]
     ] = [("Alt", 0, [], 0)]
     progress_index: int = 1
