@@ -10,8 +10,6 @@ from typing import final
 from src.lexer_parser import parse
 from src.matcher import scan
 from src.regex_ast import (
-    EOF,
-    Alt,
     AltEnd,
     GroupEnd,
     GroupStart,
@@ -91,17 +89,18 @@ class Editor(tk.Tk):
 
         for current in self.parsed:
             match current:
-                case GroupStart() | GroupEnd():
+                case GroupStart(concat_indexes=concat_indexes):
+                    highlight_text_widget(current.start, current.start + 1, "#C5E893")
+                    for index in concat_indexes:
+                        highlight_text_widget(self.parsed[index].start - 1, self.parsed[index].start, "#99BEFF")
+                case GroupEnd():
                     highlight_text_widget(current.start, current.start + 1, "#C5E893")
                 case RepeatEnd():
                     highlight_text_widget(current.end - 1, current.end, "#C5E893")
-                case RegexLiteral() | AltEnd() | EOF():
+                case RegexLiteral() | AltEnd():
                     pass
                 case RegexError():
                     highlight_text_widget(current.start, current.end, "#ED9EA3")
-                case Alt(option_indexes=option_indexes):
-                    for index in option_indexes:
-                        highlight_text_widget(self.parsed[index].start - 1, self.parsed[index].start, "#99BEFF")
 
         self.update_matches()
 

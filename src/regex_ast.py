@@ -32,14 +32,6 @@ class RegexLiteral(Spanned):
     char: str
 
 @dataclass(frozen=True)
-class Alt(Spanned):
-    """
-    A series of concatenations to be tried until the first matches.
-    """
-    option_indexes: Sequence[int]
-    progress_index: int
-
-@dataclass(frozen=True)
 class AltEnd(Spanned):
     """
     The end of one Alt concatenation.
@@ -49,9 +41,10 @@ class AltEnd(Spanned):
 @dataclass(frozen=True)
 class GroupStart(Spanned):
     """
-    The start of a group, used for tracking where repeats should point.
+    The start of a group, used for tracking concats and where repeats should point.
     """
     group_index: int
+    concat_indexes: Sequence[int]
 
 @dataclass(frozen=True)
 class GroupEnd(Spanned):
@@ -75,20 +68,12 @@ class RegexError(Spanned):
     """
     message: str
 
-@dataclass(frozen=True)
-class EOF(Spanned):
-    """
-    Represents the end of the input, used to have a valid end index to point to.
-    """
-
 type Regex = (
     RegexLiteral
-    | Alt
     | AltEnd
     | RepeatEnd
     | GroupStart
     | GroupEnd
     | RegexError
-    | EOF
 )
 

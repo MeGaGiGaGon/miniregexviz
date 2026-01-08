@@ -1,8 +1,6 @@
 from typing import TYPE_CHECKING
 
 from src.regex_ast import (
-    EOF,
-    Alt,
     AltEnd,
     GroupEnd,
     GroupStart,
@@ -21,12 +19,11 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
     Test if the regex matches starting at an index, returning the index matched to if yes, otherwise None.
     """
     backtracking_stack: list[tuple[int, int, list[int | None], list[int | None | tuple[int, int]]]] = []
-    progress_trackers: list[int | None] = [None for r in regex if isinstance(r, Alt)]
+    progress_trackers: list[int | None] = [None for r in regex if isinstance(r, GroupStart)]
     group_trackers: list[int | None | tuple[int, int]] = [None for r in regex if isinstance(r, GroupStart)]
     regex_index: int = 0
     regex_length = len(regex)
     against_length = len(against)
-    starting_index = against_index
     debug_output: list[str] = []
 
     def inc():
@@ -36,7 +33,7 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
     while True:
         debug_output.append(f"{against_index}r{regex_index} g{group_trackers} p{progress_trackers} b{backtracking_stack}")
         if regex_index >= regex_length:
-            return [(starting_index, against_index), *group_trackers], debug_output
+            return group_trackers, debug_output
         match regex[regex_index]:
             case RegexLiteral(char=char):
                 if against_index < against_length and char == against[against_index]:
@@ -46,10 +43,11 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
                     regex_index, against_index, progress_trackers, group_trackers = backtracking_stack.pop()
                 else:
                     return None, debug_output
-            case Alt(option_indexes=option_indexes, progress_index=progress_index):
-                last_progress = progress_trackers[progress_index]
+            case GroupStart(concat_indexes=option_indexes, group_index=group_index):
+                last_progress = progress_trackers[group_index]
                 if last_progress is None or last_progress < against_index:
-                    progress_trackers[progress_index] = against_index
+                    group_trackers[group_index] = against_index
+                    progress_trackers[group_index] = against_index
                     inc()
                     backtracking_stack.extend((option, against_index, progress_trackers[::], group_trackers[::]) for option in option_indexes[::-1])
                 elif backtracking_stack:
@@ -62,17 +60,12 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
                 inc()
                 backtracking_stack.append((regex_index, against_index, progress_trackers[::], group_trackers[::]))
                 regex_index = repeat_start
-            case GroupStart(group_index=group_index):
-                group_trackers[group_index] = against_index
-                inc()
             case GroupEnd(group_index=group_index):
                 match group_trackers[group_index]:
                     case int() as start:
                         group_trackers[group_index] = (start, against_index)
                     case _:
                         raise RuntimeError("Internal Error: Group tracker has non-start state while at group end")
-                inc()
-            case EOF():
                 inc()
             case RegexError():
                 return None, debug_output
