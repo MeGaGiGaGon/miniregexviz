@@ -155,10 +155,9 @@ class Editor(tk.Tk):
 
             other_group_cycle = cycle(next(other_group_color_group_cycle))
             for group in result[1:]:
-                if isinstance(group, tuple):
-                    highlight_text_widget(group[0], group[1], next(other_group_cycle))
-                    for color in group_0_colors:
-                        remove_highlight_text_widget(group[0], group[1], color)
+                highlight_text_widget(group[0], group[1], next(other_group_cycle))
+                for color in group_0_colors:
+                    remove_highlight_text_widget(group[0], group[1], color)
 
         if not debug_output:
             debug_output = ["No text to match against"]

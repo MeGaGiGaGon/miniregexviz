@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from src.regex_ast import (
     AltEnd,
@@ -14,13 +14,20 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[Sequence[int | None | tuple[int, int]] | None, list[str]]:
+class Backtracker(NamedTuple):
+    regex_index: int
+    against_index: int
+    group_starts: list[int]
+    group_ends: list[int]
+
+
+def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[Sequence[tuple[int, int]] | None, list[str]]:
     """
     Test if the regex matches starting at an index, returning the index matched to if yes, otherwise None.
     """
-    backtracking_stack: list[tuple[int, int, list[int | None], list[int | None | tuple[int, int]]]] = []
-    progress_trackers: list[int | None] = [None for r in regex if isinstance(r, GroupStart)]
-    group_trackers: list[int | None | tuple[int, int]] = [None for r in regex if isinstance(r, GroupStart)]
+    backtracking_stack: list[Backtracker] = []
+    group_starts: list[int] = [-1 for r in regex if isinstance(r, GroupStart)]
+    group_ends: list[int] = [-1 for r in regex if isinstance(r, GroupStart)]
     regex_index: int = 0
     regex_length = len(regex)
     against_length = len(against)
@@ -31,46 +38,40 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
         regex_index += 1
 
     while True:
-        debug_output.append(f"{against_index}r{regex_index} g{group_trackers} p{progress_trackers} b{backtracking_stack}")
+        debug_output.append(f"{against_index}r{regex_index} s{group_starts} e[{group_ends}] b{backtracking_stack}")
         if regex_index >= regex_length:
-            return group_trackers, debug_output
+            return [*zip(group_starts, group_ends)], debug_output
         match regex[regex_index]:
             case RegexLiteral(char=char):
                 if against_index < against_length and char == against[against_index]:
                     inc()
                     against_index += 1
                 elif backtracking_stack:
-                    regex_index, against_index, progress_trackers, group_trackers = backtracking_stack.pop()
+                    regex_index, against_index, group_starts, group_ends = backtracking_stack.pop()
                 else:
                     return None, debug_output
             case GroupStart(concat_indexes=option_indexes, group_index=group_index):
-                last_progress = progress_trackers[group_index]
-                if last_progress is None or last_progress < against_index:
-                    group_trackers[group_index] = against_index
-                    progress_trackers[group_index] = against_index
+                if group_starts[group_index] < against_index:
+                    group_starts[group_index] = against_index
                     inc()
-                    backtracking_stack.extend((option, against_index, progress_trackers[::], group_trackers[::]) for option in option_indexes[::-1])
+                    backtracking_stack.extend(Backtracker(option, against_index, group_starts[::], group_ends[::]) for option in option_indexes[::-1])
                 elif backtracking_stack:
-                    regex_index, against_index, progress_trackers, group_trackers = backtracking_stack.pop()
+                    regex_index, against_index, group_starts, group_ends = backtracking_stack.pop()
                 else:
                     return None, debug_output
             case AltEnd(jump_to=jump_to):
                 regex_index = jump_to
             case RepeatEnd(repeat_start=repeat_start):
                 inc()
-                backtracking_stack.append((regex_index, against_index, progress_trackers[::], group_trackers[::]))
+                backtracking_stack.append(Backtracker(regex_index, against_index, group_starts[::], group_ends[::]))
                 regex_index = repeat_start
             case GroupEnd(group_index=group_index):
-                match group_trackers[group_index]:
-                    case int() as start:
-                        group_trackers[group_index] = (start, against_index)
-                    case _:
-                        raise RuntimeError("Internal Error: Group tracker has non-start state while at group end")
+                group_ends[group_index] = against_index
                 inc()
             case RegexError():
                 return None, debug_output
 
-def scan(regex: Sequence[Regex], against: str, starting_index: int) -> tuple[Sequence[int | None | tuple[int, int]] | None, list[str]]:
+def scan(regex: Sequence[Regex], against: str, starting_index: int) -> tuple[Sequence[tuple[int, int]] | None, list[str]]:
     """
     Try to match the regex starting from the starting index. Returns the starting index and index matched until if success, otherwise None.
     """
