@@ -2,7 +2,6 @@
 A basic tkinter gui, currently supports simple syntax highlighting on an input regex.
 """
 
-import dataclasses
 import tkinter as tk
 from itertools import cycle
 from typing import final
@@ -81,7 +80,7 @@ class Editor(tk.Tk):
         _ = self.ast_display.configure(state="normal")
         ast_text: list[str] = []
         for re_index, re in enumerate(self.parsed):
-            ast_text.append(f"{re_index} {re.__class__.__name__}({", ".join(f"{k}={v}" for k, v in dataclasses.asdict(re).items() if k != "source")})")  # pyright: ignore[reportAny]
+            ast_text.append(f"{re_index} {re}")
         self.ast_display.delete("1.0", tk.END)
         self.ast_display.insert("1.0", "\n".join(ast_text))
         _ = self.ast_display.configure(state="disabled")
