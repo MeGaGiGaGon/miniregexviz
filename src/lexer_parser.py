@@ -34,7 +34,7 @@ class InProgressAlt(NamedTuple):
 
 def parse(source: str) -> Sequence[Regex]:
     if not source:
-        return [GroupStart(0, 0, "", 0, [1]), GroupEnd(0, 0, "", 0, 0)]
+        return [GroupStart(0, 0, 0, [1]), GroupEnd(0, 0, 0, 0)]
 
     group_stack: list[InProgressGroup] = [InProgressGroup(-1, 0, [InProgressAlt(1, [])])]
 
@@ -45,15 +45,15 @@ def parse(source: str) -> Sequence[Regex]:
         group_start_index, group_index, alts = group_stack.pop()
         concat = last_concat()
         if finished:
-            concat.append(GroupStart(group_start_index, source_index + 1, source, group_index, [alt_start for alt_start, _ in alts[1:]]))
+            concat.append(GroupStart(group_start_index, source_index + 1, group_index, [alt_start for alt_start, _ in alts[1:]]))
         else:
-            concat.append(RegexError(group_start_index, group_start_index + 1, source, "Unclosed Group"))
+            concat.append(RegexError(group_start_index, group_start_index + 1, "Unclosed Group"))
         concat.extend(alts[0].concat)
         for alt_start, alt in alts[1:]:
-            concat.append(AltEnd(alt_start - 1, alt_start, source, regex_index))
+            concat.append(AltEnd(alt_start - 1, alt_start, regex_index))
             concat.extend(alt)
         if finished:
-            concat.append(GroupEnd(source_index, source_index + 1, source, group_start_index, group_index))
+            concat.append(GroupEnd(source_index, source_index + 1, group_start_index, group_index))
 
     for source_index, char in enumerate(source):
         regex_index = source_index + 1
@@ -63,20 +63,20 @@ def parse(source: str) -> Sequence[Regex]:
             group_stack[-1].alts.append(InProgressAlt(regex_index + 1, []))
         elif char == ")":
             if len(group_stack) == 1:
-                last_concat().append(RegexError(source_index, source_index + 1, source, "Unopened group"))
+                last_concat().append(RegexError(source_index, source_index + 1, "Unopened group"))
             else:
                 fold_last_group(True)
         elif char == "+":
             concat = last_concat()
             match concat:
                 case [*_, RegexLiteral(start)]:
-                    concat.append(RepeatEnd(start, source_index + 1, source, regex_index - 1))
+                    concat.append(RepeatEnd(start, source_index + 1, regex_index - 1))
                 case [*_, GroupEnd(start, group_start=group_start)]:
-                    concat.append(RepeatEnd(start, source_index + 1, source, group_start + 1))
+                    concat.append(RepeatEnd(start, source_index + 1, group_start + 1))
                 case _:
-                    concat.append(RegexError(source_index, source_index + 1, source, "Unrepeatable item"))
+                    concat.append(RegexError(source_index, source_index + 1, "Unrepeatable item"))
         else:
-            last_concat().append(RegexLiteral(source_index, source_index + 1, source, char))
+            last_concat().append(RegexLiteral(source_index, source_index + 1, char))
     while len(group_stack) > 1:
         fold_last_group(False)
     group_stack.insert(0, InProgressGroup(0, 0, [InProgressAlt(1, [])]))

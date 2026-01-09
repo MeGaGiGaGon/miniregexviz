@@ -18,7 +18,6 @@ class Spanned:
 
     start: int
     end: int
-    source: str
 
     @property
     def length(self) -> int:
