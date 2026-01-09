@@ -15,6 +15,7 @@ ignore = [
     "TRY003", "EM101", "FBT003", "EM102",  # Stupid rule
     "ERA001",  # Still in-dev
     "A002",  # I like shadowing input
+    "COM812",  # Formatter conflict
 ]
 
 [tool.ruff.lint.per-file-ignores]
