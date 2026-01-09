@@ -40,7 +40,7 @@ def matches(regex: Sequence[Regex], against: str, against_index: int) -> tuple[S
     while True:
         debug_output.append(f"{against_index}r{regex_index} s{group_starts} e[{group_ends}] b{backtracking_stack}")
         if regex_index >= regex_length:
-            return [*zip(group_starts, group_ends)], debug_output
+            return [*zip(group_starts, group_ends, strict=True)], debug_output
         match regex[regex_index]:
             case RegexLiteral(char=char):
                 if against_index < against_length and char == against[against_index]:
