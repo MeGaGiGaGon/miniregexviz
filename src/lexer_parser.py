@@ -3,6 +3,8 @@ The lexer and parser for turning a string into a regex AST.
 """
 
 
+from collections.abc import Container
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple, NewType, TypeGuard
 
 from src.regex_ast import (
@@ -12,6 +14,8 @@ from src.regex_ast import (
     CharSet,
     Comment,
     Conditional,
+    Flag,
+    GlobalFlags,
     GroupEnd,
     GroupStart,
     InlineFlags,
@@ -30,28 +34,98 @@ from src.regex_ast import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-Char = NewType("Char", str)
-
 class GenericSpanned[T](NamedTuple):
     start: int
     end: int
     item: T
 
-type Token = GenericSpanned[Char | RegexLiteral | ZeroWidthRegexLiteral | Comment | Capturing | Noncapturing | InlineFlags | Lookaround]
+class TokenGroupEnd: ...
+class TokenAlt: ...
 
-def lexer(source: str) -> Sequence[Token]:
-    source_length = len(source)
-    source_index: int = 0
+type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
+
+@dataclass
+class SourceHandler:
+    "Tracks the source in a rust-like way to prevent way too many inbounds checks"
+    source: str
+    index: int = 0
+    stored_index: int = 0
+
+    def next(self) -> str | None:
+        if self.index < len(self.source):
+            self.index += 1
+            return self.source[self.index - 1]
+
+    def peek(self) -> str | None:
+        if self.index < len(self.source):
+            return self.source[self.index]
+
+    def next_if_eq(self, c: str) -> str | None:
+        if self.peek() == c:
+            return self.next()
+
+    def next_if_ne(self, c: str) -> str | None:
+        if self.peek() != c:
+            return self.next()
+
+    def next_if_in(self, c: Container[str]) -> str | None:
+        if self.peek() in c:
+            return self.next()
+    
+    def span(self) -> tuple[int, int]:
+        stored = self.stored_index
+        self.stored_index = self.index
+        return stored, self.index
+
+    def next_while_flag(self, negative: bool) -> set[Flag]:
+        flags = set[Flag]()
+        check = Flag.NEGATIVE if negative else Flag._value2member_map_
+        while n := self.next_if_in(check):
+            flags.add(Flag(n))
+        return flags
+
+def lexer(raw_source: str) -> Sequence[Token]:
+    source = SourceHandler(raw_source)
+    group_index = 1
     output: list[Token] = []
-    while source_index < source_length:
-        char = source[source_index]
+    while char := source.next():
         if char == "(":
-            ... # TODO: groups
+            if source.next_if_eq("?"):
+                if source.peek() in Flag._value2member_map_:
+                    flags = source.next_while_flag(False)
+                    if source.next_if_eq(")"):
+                        if output:
+                            output.append(RegexError(*source.span(), "Global flag groups must only be at the start of the regex"))
+                        elif Flag.has_conflict(flags):
+                            output.append(RegexError(*source.span(), "Flags 'a', 'u' and 'L' are incompatible"))
+                        else:
+                            output.append(GlobalFlags(*source.span(), flags))
+                        continue
+                    # if source.next_if_eq("-"):
+                    #     negative = set[Flag]()
+                    #     while n := source.next_if_in(Flag.NEGATIVE):
+                    #         negative.add(Flag(n))
+                    else:
+                        unknown_index = source.index
+                        while source.next_if_ne(")"):
+                            pass
+                        _ = source.next_if_eq(")")
+                        output.append(RegexError(*source.span(), f"Unknown flag at position {unknown_index}"))
+                # elif source.next_if_eq("-"):
+                #     ...
+                elif source.next_if_eq(":"):
+                    output.append(GenericSpanned(*source.span(), Noncapturing("Noncapturing")))
+            else:
+                output.append(GenericSpanned(*source.span(), Capturing("Numbered", group_index, None)))
+                group_index += 1
         elif char == "\\":
             ... # TODO: specials
+        elif char == ")":
+            output.append(GenericSpanned(*source.span(), TokenGroupEnd()))
+        elif char == "|":
+            output.append(GenericSpanned(*source.span(), TokenAlt()))
         else:
-            output.append(GenericSpanned(source_index, source_index + 1, Char(char)))
-            source_index += 1
+            output.append(RegexLiteral(*source.span(), SingleChar(char, False)))
     return output
 
 def is_regex_sequence(data: Sequence[object]) -> TypeGuard[Sequence[Regex]]:
