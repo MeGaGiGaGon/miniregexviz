@@ -1,24 +1,58 @@
 """
 The lexer and parser for turning a string into a regex AST.
-
-Currently just a parser since the lexer is not needed yet.
 """
 
 
-from typing import TYPE_CHECKING, NamedTuple, TypeGuard
+from typing import TYPE_CHECKING, Literal, NamedTuple, NewType, TypeGuard
 
 from src.regex_ast import (
     AltEnd,
+    Backref,
+    Capturing,
+    CharSet,
+    Comment,
+    Conditional,
     GroupEnd,
     GroupStart,
+    InlineFlags,
+    Lookaround,
+    Noncapturing,
     Regex,
     RegexError,
     RegexLiteral,
     RepeatEnd,
+    RepeatStart,
+    ShortCharSet,
+    SingleChar,
+    ZeroWidthRegexLiteral,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+Char = NewType("Char", str)
+
+class GenericSpanned[T](NamedTuple):
+    start: int
+    end: int
+    item: T
+
+type Token = GenericSpanned[Char | RegexLiteral | ZeroWidthRegexLiteral | Comment | Capturing | Noncapturing | InlineFlags | Lookaround]
+
+def lexer(source: str) -> Sequence[Token]:
+    source_length = len(source)
+    source_index: int = 0
+    output: list[Token] = []
+    while source_index < source_length:
+        char = source[source_index]
+        if char == "(":
+            ... # TODO: groups
+        elif char == "\\":
+            ... # TODO: specials
+        else:
+            output.append(GenericSpanned(source_index, source_index + 1, Char(char)))
+            source_index += 1
+    return output
 
 def is_regex_sequence(data: Sequence[object]) -> TypeGuard[Sequence[Regex]]:
     return all(isinstance(x, Regex.__value__) for x in data)  # pyright: ignore[reportAny]
@@ -32,8 +66,8 @@ class InProgressAlt(NamedTuple):
     start_regex_index: int
     concat: list[Regex]
 
-def parse(source: str) -> Sequence[Regex]:
-    if not source:
+def parse(tokens: Sequence[Token]) -> Sequence[Regex]:
+    if not tokens:
         return [GroupStart(0, 0, 0, [1]), GroupEnd(0, 0, 0, 0)]
 
     group_stack: list[InProgressGroup] = [InProgressGroup(-1, 0, [InProgressAlt(1, [])])]
@@ -55,7 +89,7 @@ def parse(source: str) -> Sequence[Regex]:
         if finished:
             concat.append(GroupEnd(source_index, source_index + 1, group_start_index, group_index))
 
-    for source_index, char in enumerate(source):
+    for source_index, char in enumerate(tokens):
         regex_index = source_index + 1
         if char == "(":
             group_stack.append(InProgressGroup(source_index, group_stack[-1].group_index + 1, [InProgressAlt(regex_index + 1, [])]))
