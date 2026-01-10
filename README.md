@@ -18,6 +18,7 @@ PS miniregexviz> uv run main.py  # Run the GUI
 Usage:
 uv run main.py: run gui
 uv run main.py help: Show this message
+uv run main.py lex "source": print lexed result of "source"
 uv run main.py parse "regex": print parsed result of "regex"
 uv run main.py match "regex" "data" start?: print where the index regex matches data till, starting at start
 uv run main.py scan "regex" "data" start?: print where the index regex matches data till, scanning from start

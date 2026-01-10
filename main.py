@@ -2,6 +2,7 @@
 Usage:
 uv run main.py: run gui
 uv run main.py help: Show this message
+uv run main.py lex "source": print lexed result of "source"
 uv run main.py parse "regex": print parsed result of "regex"
 uv run main.py match "regex" "data" start?: print where the index regex matches data till, starting at start
 uv run main.py scan "regex" "data" start?: print where the index regex matches data till, scanning from start
@@ -12,7 +13,7 @@ Add --pdb to drop into debugger on run
 import sys
 
 from src.gui import Editor
-from src.lexer_parser import parse
+from src.lexer_parser import lexer, parse
 from src.matcher import matches, scan
 
 
@@ -32,6 +33,8 @@ if __name__ == "__main__":
     match args:
         case []:
             main()
+        case ["lex", raw_source]:
+            print(*lexer(raw_source), sep="\n")
         case ["parse", regex_source]:
             for index, regex in enumerate(parse(regex_source)):
                 print(index, regex)
