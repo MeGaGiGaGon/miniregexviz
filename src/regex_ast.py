@@ -4,6 +4,7 @@ Types representing the regex AST.
 
 
 from dataclasses import dataclass
+from enum import StrEnum, nonmember
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 if TYPE_CHECKING:
@@ -67,8 +68,24 @@ class Capturing(NamedTuple):
 class Noncapturing(NamedTuple):
     type: Literal["Noncapturing", "Atomic"]
 
+class Flag(StrEnum):
+    AsciiOnly = "a"
+    IgnoreCase = "i"
+    LocaleDependant = "L"
+    MultiLine = "m"
+    DotAll = "s"
+    Unicode = "u"
+    Verbose = "x"
+
+    NEGATIVE = nonmember("imsv")
+
+    @nonmember
+    @staticmethod
+    def has_conflict(flags: set[Flag]) -> bool:
+        return (Flag.AsciiOnly in flags and Flag.LocaleDependant in flags) or (Flag.AsciiOnly in flags and Flag.Unicode in flags) or (Flag.LocaleDependant in flags and Flag.Unicode in flags)
+
 class InlineFlags(NamedTuple):
-    inline_flags: tuple[set[Literal["aiLmsux"]], set[Literal["imsx"]]]
+    inline_flags: tuple[set[Flag], set[Literal[Flag.IgnoreCase, Flag.MultiLine, Flag.DotAll, Flag.Verbose]]]
 
 class Lookaround(NamedTuple):
     type: Literal["Lookahead", "Lookbehind"]
@@ -82,6 +99,10 @@ class GroupStart(Spanned):
     """
     type: Capturing | Noncapturing | InlineFlags | Lookaround
     concat_indexes: Sequence[int]
+
+@dataclass(frozen=True)
+class GlobalFlags(Spanned):
+    flags: set[Flag]
 
 @dataclass(frozen=True)
 class Conditional(Spanned):
@@ -130,6 +151,7 @@ type Regex = (
     | ZeroWidthRegexLiteral
     | AltEnd
     | GroupStart
+    | GlobalFlags
     | Conditional
     | GroupEnd
     | RepeatStart
