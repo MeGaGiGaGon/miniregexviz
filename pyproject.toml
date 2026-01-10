@@ -13,7 +13,7 @@ ignore = [
     "D",  # I'll document as I want to
     "ANN", "RET",  # Type checker will complain if I need more annotations
     "TRY003", "EM101", "FBT003", "EM102",  # Stupid rule
-    "ERA001",  # Still in-dev
+    "ERA001", "TD003", "TD002", "FIX002",  # Still in-dev
     "A002",  # I like shadowing input
     "COM812",  # Formatter conflict
 ]
