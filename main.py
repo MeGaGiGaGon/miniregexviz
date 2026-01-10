@@ -36,15 +36,15 @@ if __name__ == "__main__":
         case ["lex", raw_source]:
             print(*lexer(raw_source), sep="\n")
         case ["parse", regex_source]:
-            for index, regex in enumerate(parse(regex_source)):
+            for index, regex in enumerate(parse(lexer(regex_source))):
                 print(index, regex)
         case ["match", regex_source, target, *rest] if (len(rest) == 1 and (start:=int(rest[0]))) or len(rest) == (start:=0):
-            group_info, debug = matches(parse(regex_source), target, start)
+            group_info, debug = matches(parse(lexer(regex_source)), target, start)
             print(group_info)
             print()
             print("\n".join(debug))
         case ["scan", regex_source, target, *rest] if (len(rest) == 1 and (start:=int(rest[0]))) or len(rest) == (start:=0):
-            group_info, debug = scan(parse(regex_source), target, start)
+            group_info, debug = scan(parse(lexer(regex_source)), target, start)
             print(group_info)
             print()
             print("\n".join(debug))
