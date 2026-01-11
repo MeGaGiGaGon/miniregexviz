@@ -39,7 +39,9 @@ class GenericSpanned[T](NamedTuple):
     end: int
     item: T
 
+@dataclass
 class TokenGroupEnd: ...
+@dataclass
 class TokenAlt: ...
 
 type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
@@ -79,7 +81,7 @@ class SourceHandler:
 
     def next_while_flag(self, negative: bool) -> set[Flag]:
         flags = set[Flag]()
-        check = Flag.NEGATIVE if negative else Flag._value2member_map_
+        check = Flag.NEGATIVE if negative else Flag
         while n := self.next_if_in(check):
             flags.add(Flag(n))
         return flags
@@ -91,7 +93,7 @@ def lexer(raw_source: str) -> Sequence[Token]:
     while char := source.next():
         if char == "(":
             if source.next_if_eq("?"):
-                if source.peek() in Flag._value2member_map_:
+                if source.peek() in Flag or source.peek() == "-":
                     flags = source.next_while_flag(False)
                     if source.next_if_eq(")"):
                         if output:
@@ -101,16 +103,19 @@ def lexer(raw_source: str) -> Sequence[Token]:
                         else:
                             output.append(GlobalFlags(*source.span(), flags))
                         continue
-                    # if source.next_if_eq("-"):
-                    #     negative = set[Flag]()
-                    #     while n := source.next_if_in(Flag.NEGATIVE):
-                    #         negative.add(Flag(n))
+
+                    negative = set[Flag]()
+                    if source.next_if_eq("-"):
+                        while n := source.next_if_in(Flag.NEGATIVE):
+                            negative.add(Flag(n))
+
+                    if source.next_if_eq(":"):
+                        if not flags and not negative:
+                            output.append(RegexError(*source.span(), f"Missing flag at position {source.index - 1}"))
+                        else:
+                            output.append(GenericSpanned(*source.span(), InlineFlags(flags, negative)))
                     else:
-                        unknown_index = source.index
-                        while source.next_if_ne(")"):
-                            pass
-                        _ = source.next_if_eq(")")
-                        output.append(RegexError(*source.span(), f"Unknown flag at position {unknown_index}"))
+                        output.append(RegexError(*source.span(), f"Unknown flag at position {source.index}"))
                 # elif source.next_if_eq("-"):
                 #     ...
                 elif source.next_if_eq(":"):
