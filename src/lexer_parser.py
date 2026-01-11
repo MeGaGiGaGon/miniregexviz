@@ -150,6 +150,13 @@ def lexer(raw_source: str) -> Sequence[Token]:
                             output.append(RegexLiteral(*source.span(), Backref("Name", group_names[name])))
                     else:
                         output.append(RegexError(*source.span(), "Unknown group extension"))
+                elif source.next_if_eq("#"):
+                    while source.next_if_ne(")"):
+                        pass
+                    if source.peek():
+                        output.append(Comment(*source.span()))
+                    else:
+                        output.append(RegexError(*source.span(), "Unclosed comment"))
                 else:
                     output.append(RegexError(*source.span(), "Unkown group extension"))
             else:
