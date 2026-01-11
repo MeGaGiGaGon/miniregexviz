@@ -85,7 +85,8 @@ class Flag(StrEnum):
         return (Flag.AsciiOnly in flags and Flag.LocaleDependant in flags) or (Flag.AsciiOnly in flags and Flag.Unicode in flags) or (Flag.LocaleDependant in flags and Flag.Unicode in flags)
 
 class InlineFlags(NamedTuple):
-    inline_flags: tuple[set[Flag], set[Literal[Flag.IgnoreCase, Flag.MultiLine, Flag.DotAll, Flag.Verbose]]]
+    flags: set[Flag]
+    negative: set[Literal[Flag.IgnoreCase, Flag.MultiLine, Flag.DotAll, Flag.Verbose]]
 
 class Lookaround(NamedTuple):
     type: Literal["Lookahead", "Lookbehind"]
