@@ -48,8 +48,13 @@ class TokenAlt: ...
 @dataclass
 class TokenConditional:
     group_index: int
+@dataclass
+class TokenRepeat:
+    mode: Literal["greedy", "lazy", "possessive"]
+    minimum: int
+    maximum: int | None
 
-type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround | TokenConditional] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
+type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround | TokenConditional | TokenRepeat] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
 
 @dataclass
 class SourceHandler:
@@ -106,7 +111,52 @@ def lexer(raw_source: str) -> Sequence[Token]:
     group_names: dict[str, int] = {}
     output: list[Token] = []
     while char := source.next():
-        if char == "(":
+        if char in "*+?{":
+            if char == "*":
+                minimum, maximum = (0, None)
+            elif char == "+":
+                minimum, maximum = (1, None)
+            elif char == "?":
+                minimum, maximum = (0, 1)
+            else:
+                starting_index = source.index
+                raw_min = ""
+                while c := source.next_if_in(string.digits):
+                    raw_min += c
+                if source.next_if_eq(","):
+                    raw_max = ""
+                    while c := source.next_if_in(string.digits):
+                        raw_max += c
+                    if source.next_if_eq("}"):
+                        if raw_min:
+                            minimum = int(raw_min)
+                        else:
+                            minimum = 0
+                        if raw_max:
+                            maximum = int(raw_max)
+                        else:
+                            maximum = None
+                        if maximum is not None and minimum > maximum:
+                            output.append(RegexError(*source.span(), "Repeat min greater than max"))
+                            continue
+                    else:
+                        source.index = starting_index
+                        output.append(RegexLiteral(*source.span(), SingleChar(char, False)))
+                        continue
+                elif raw_min and source.next_if_eq("}"):
+                    minimum = maximum = int(raw_min)
+                else:
+                    source.index = starting_index
+                    output.append(RegexLiteral(*source.span(), SingleChar(char, False)))
+                    continue
+            if source.next_if_eq("?"):
+                mode = "lazy"
+            elif source.next_if_eq("+"):
+                mode = "possessive"
+            else:
+                mode = "greedy"
+            output.append(GenericSpanned(*source.span(), TokenRepeat(mode, minimum, maximum)))
+        elif char == "(":
             if source.next_if_eq("?"):
                 if source.peek() in Flag or source.peek() == "-":
                     flags = source.next_while_flag(False)
@@ -292,6 +342,10 @@ def lexer(raw_source: str) -> Sequence[Token]:
                 output.append(RegexError(*source.span(), "Incomplete escape"))
             elif source.next_if_eq("\\"):
                 output.append(RegexLiteral(*source.span(), SingleChar("\\", True)))
+            elif source.next_if_in(string.ascii_letters):
+                output.append(RegexError(*source.span(), "Bad escape"))
+            else:
+                output.append(RegexLiteral(*source.span(), SingleChar(char, False)))
         elif char == ")":
             output.append(GenericSpanned(*source.span(), TokenGroupEnd()))
         elif char == "|":
