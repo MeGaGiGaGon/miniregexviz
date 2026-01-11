@@ -135,7 +135,7 @@ class RepeatEnd(Spanned):
     repeat_start: int
     mode: Literal["greedy", "lazy", "possessive"]
     minimum: int
-    maximum: int
+    maximum: int | None
 
 @dataclass(frozen=True)
 class RegexError(Spanned):
