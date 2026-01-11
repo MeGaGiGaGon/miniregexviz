@@ -89,6 +89,7 @@ class SourceHandler:
 def lexer(raw_source: str) -> Sequence[Token]:
     source = SourceHandler(raw_source)
     group_index = 1
+    group_names: dict[str, int] = {}
     output: list[Token] = []
     while char := source.next():
         if char == "(":
@@ -116,10 +117,41 @@ def lexer(raw_source: str) -> Sequence[Token]:
                             output.append(GenericSpanned(*source.span(), InlineFlags(flags, negative)))
                     else:
                         output.append(RegexError(*source.span(), f"Unknown flag at position {source.index}"))
-                # elif source.next_if_eq("-"):
-                #     ...
                 elif source.next_if_eq(":"):
                     output.append(GenericSpanned(*source.span(), Noncapturing("Noncapturing")))
+                elif source.next_if_eq(">"):
+                    output.append(GenericSpanned(*source.span(), Noncapturing("Atomic")))
+                elif source.next_if_eq("P"):
+                    if source.next_if_eq("<"):
+                        name = ""
+                        while n := source.next_if_ne(">"):
+                            name += n
+                        if not name:
+                            output.append(RegexError(*source.span(), "Missing group name"))
+                        elif not source.next_if_eq(">"):
+                            output.append(RegexError(*source.span(), "Unclosed group name"))
+                        elif not name.isidentifier():
+                            output.append(RegexError(*source.span(), "Invalid group name"))
+                        else:
+                            output.append(GenericSpanned(*source.span(), Capturing("Named", group_index, name)))
+                            group_names[name] = group_index
+                            group_index += 1
+                    elif source.next_if_eq("="):
+                        name = ""
+                        while n := source.next_if_ne(")"):
+                            name += n
+                        if not name:
+                            output.append(RegexError(*source.span(), "Missing group name"))
+                        elif not source.next_if_eq(")"):
+                            output.append(RegexError(*source.span(), "Unterminated group name"))
+                        elif name not in group_names:
+                            output.append(RegexError(*source.span(), "Unknown group name"))
+                        else:
+                            output.append(RegexLiteral(*source.span(), Backref("Name", group_names[name])))
+                    else:
+                        output.append(RegexError(*source.span(), "Unknown group extension"))
+                else:
+                    output.append(RegexError(*source.span(), "Unkown group extension"))
             else:
                 output.append(GenericSpanned(*source.span(), Capturing("Numbered", group_index, None)))
                 group_index += 1
