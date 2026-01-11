@@ -6,7 +6,7 @@ The lexer and parser for turning a string into a regex AST.
 from collections.abc import Container
 from dataclasses import dataclass
 import string
-from typing import TYPE_CHECKING, Literal, NamedTuple, NewType, TypeGuard
+from typing import TYPE_CHECKING, Literal, LiteralString, NamedTuple, NewType, TypeGuard, overload
 import unicodedata
 
 from src.regex_ast import (
@@ -80,6 +80,10 @@ class SourceHandler:
         if self.peek() != c:
             return self.next()
 
+    @overload
+    def next_if_in[S: LiteralString](self, c: Container[S]) -> S | None: ...
+    @overload
+    def next_if_in[S: str](self, c: Container[S]) -> S | None: ...
     def next_if_in(self, c: Container[str]) -> str | None:
         if self.peek() in c:
             return self.next()
@@ -221,12 +225,10 @@ def lexer(raw_source: str) -> Sequence[Token]:
                         output.append(RegexLiteral(*source.span(), Backref("Number", num)))
                     else:
                         output.append(RegexError(*source.span(), "Bad group number"))
-            elif c := source.next_if_in("AbBzZ"):
-                # Ignore error, we just checked to make sure c is one of the correct literals
-                output.append(ZeroWidthRegexLiteral(*source.span(), c))  # pyright: ignore[reportArgumentType]
-            elif c := source.next_if_in("dDsSwW"):
-                # Ignore error, we just checked to make sure c is one of the correct literals
-                output.append(RegexLiteral(*source.span(), ShortCharSet(c)))  # pyright: ignore[reportArgumentType]
+            elif c := source.next_if_in(("A", "b", "B", "z", "Z")):
+                output.append(ZeroWidthRegexLiteral(*source.span(), c))
+            elif c := source.next_if_in(("d", "D", "s", "S", "w", "W")):
+                output.append(RegexLiteral(*source.span(), ShortCharSet(c)))
             elif source.next_if_eq("a"):
                 output.append(RegexLiteral(*source.span(), SingleChar("\x07", True)))
             elif source.next_if_eq("f"):
