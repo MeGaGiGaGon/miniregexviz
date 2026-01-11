@@ -157,6 +157,17 @@ def lexer(raw_source: str) -> Sequence[Token]:
                         output.append(Comment(*source.span()))
                     else:
                         output.append(RegexError(*source.span(), "Unclosed comment"))
+                elif source.next_if_eq("="):
+                    output.append(GenericSpanned(*source.span(), Lookaround("Lookahead", False)))
+                elif source.next_if_eq("!"):
+                    output.append(GenericSpanned(*source.span(), Lookaround("Lookahead", True)))
+                elif source.next_if_eq("<"):
+                    if source.next_if_eq("="):
+                        output.append(GenericSpanned(*source.span(), Lookaround("Lookbehind", False)))
+                    elif source.next_if_eq("!"):
+                        output.append(GenericSpanned(*source.span(), Lookaround("Lookbehind", True)))
+                    else:
+                        output.append(RegexError(*source.span(), "Unkown group extension"))
                 else:
                     output.append(RegexError(*source.span(), "Unkown group extension"))
             else:
