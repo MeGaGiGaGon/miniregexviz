@@ -86,7 +86,7 @@ class Flag(StrEnum):
 
 class InlineFlags(NamedTuple):
     flags: set[Flag]
-    negative: set[Literal[Flag.IgnoreCase, Flag.MultiLine, Flag.DotAll, Flag.Verbose]]
+    negative: set[Flag]  # Should technically be a limited set, but we make sure of that in the parser and this types better
 
 class Lookaround(NamedTuple):
     type: Literal["Lookahead", "Lookbehind"]
