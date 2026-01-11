@@ -5,7 +5,9 @@ The lexer and parser for turning a string into a regex AST.
 
 from collections.abc import Container
 from dataclasses import dataclass
+import string
 from typing import TYPE_CHECKING, Literal, NamedTuple, NewType, TypeGuard
+import unicodedata
 
 from src.regex_ast import (
     AltEnd,
@@ -43,8 +45,11 @@ class GenericSpanned[T](NamedTuple):
 class TokenGroupEnd: ...
 @dataclass
 class TokenAlt: ...
+@dataclass
+class TokenConditional:
+    group_index: int
 
-type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
+type Token = GenericSpanned[TokenGroupEnd | TokenAlt | Capturing | Noncapturing | InlineFlags | Lookaround | TokenConditional] | ZeroWidthRegexLiteral | Comment | RegexError | GlobalFlags | RegexLiteral
 
 @dataclass
 class SourceHandler:
@@ -61,6 +66,11 @@ class SourceHandler:
     def peek(self) -> str | None:
         if self.index < len(self.source):
             return self.source[self.index]
+
+    def peek_in(self, c: str) -> bool:
+        if p := self.peek():
+            return p == c
+        return False
 
     def next_if_eq(self, c: str) -> str | None:
         if self.peek() == c:
@@ -168,13 +178,118 @@ def lexer(raw_source: str) -> Sequence[Token]:
                         output.append(GenericSpanned(*source.span(), Lookaround("Lookbehind", True)))
                     else:
                         output.append(RegexError(*source.span(), "Unkown group extension"))
+                elif source.next_if_eq("("):
+                    name = ""
+                    while n := source.next_if_eq(")"):
+                        name += n
+                    if source.next_if_eq(")"):
+                        try:
+                            num = int(name)
+                            if 0 < num < group_index:
+                                output.append(GenericSpanned(*source.span(), TokenConditional(num)))
+                            else:
+                                output.append(RegexError(*source.span(), "Bad group number"))
+                        except ValueError:
+                            if name in group_names:
+                                output.append(GenericSpanned(*source.span(), TokenConditional(group_names[name])))
+                            else:
+                                output.append(RegexError(*source.span(), "Unknown group name"))
+                    else:
+                        output.append(RegexError(*source.span(), "Unterminated group name"))
                 else:
                     output.append(RegexError(*source.span(), "Unkown group extension"))
             else:
                 output.append(GenericSpanned(*source.span(), Capturing("Numbered", group_index, None)))
                 group_index += 1
         elif char == "\\":
-            ... # TODO: specials
+            if source.next_if_eq("0"):
+                c = chr(int("0" + (source.next_if_in("01234567") or "") + (source.next_if_in("01234567") or ""), 8))
+                output.append(RegexLiteral(*source.span(), SingleChar(c, True)))
+            elif n1 := source.next_if_in(string.digits):
+                if n2 := source.next_if_in(string.digits):
+                    if n1 in "1234567" and n2 in "01234567" and (n3 := source.next_if_in("01234567")):
+                        output.append(RegexLiteral(*source.span(), SingleChar(chr(int(n1 + n2 + n3, 8)), True)))
+                    else:
+                        num = int(n1 + n2)
+                        if 0 < num < group_index:
+                            output.append(RegexLiteral(*source.span(), Backref("Number", num)))
+                        else:
+                            output.append(RegexError(*source.span(), "Bad group number"))
+                else:
+                    num = int(n1)
+                    if 0 < num < group_index:
+                        output.append(RegexLiteral(*source.span(), Backref("Number", num)))
+                    else:
+                        output.append(RegexError(*source.span(), "Bad group number"))
+            elif c := source.next_if_in("AbBzZ"):
+                # Ignore error, we just checked to make sure c is one of the correct literals
+                output.append(ZeroWidthRegexLiteral(*source.span(), c))  # pyright: ignore[reportArgumentType]
+            elif c := source.next_if_in("dDsSwW"):
+                # Ignore error, we just checked to make sure c is one of the correct literals
+                output.append(RegexLiteral(*source.span(), ShortCharSet(c)))  # pyright: ignore[reportArgumentType]
+            elif source.next_if_eq("a"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\x07", True)))
+            elif source.next_if_eq("f"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\x0c", True)))
+            elif source.next_if_eq("n"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\n", True)))
+            elif source.next_if_eq("N"):
+                if source.next_if_eq("{"):
+                    name = ""
+                    while c := source.next_if_ne("}"):
+                        name += c
+                    if source.next_if_eq("}"):
+                        try:
+                            c = unicodedata.lookup(name)
+                        except KeyError:
+                            output.append(RegexError(*source.span(), "Unknown unicode name"))
+                            continue
+                        output.append(RegexLiteral(*source.span(), SingleChar(c, True)))
+                    else:
+                        output.append(RegexError(*source.span(), "Missing }"))
+                else:
+                    output.append(RegexError(*source.span(), "Missing {"))
+            elif source.next_if_eq("r"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\r", True)))
+            elif source.next_if_eq("t"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\t", True)))
+            elif source.next_if_eq("u"):
+                num = ""
+                for _ in range(4):
+                    if c := source.next_if_in("0123456789ABCDEF"):
+                        num += c
+                    else:
+                        break
+                else:
+                    output.append(RegexLiteral(*source.span(), SingleChar(chr(int(num, 16)), True)))
+                    continue
+                output.append(RegexError(*source.span(), "Incomplete escape"))
+            elif source.next_if_eq("U"):
+                num = ""
+                for _ in range(8):
+                    if c := source.next_if_in("0123456789ABCDEF"):
+                        num += c
+                    else:
+                        break
+                else:
+                    output.append(RegexLiteral(*source.span(), SingleChar(chr(int(num, 16)), True)))
+                    continue
+                output.append(RegexError(*source.span(), "Incomplete escape"))
+            elif source.next_if_eq("v"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\v", True)))
+            elif source.next_if_eq("x"):
+                num = ""
+                for _ in range(2):
+                    if c := source.next_if_in("0123456789ABCDEF"):
+                        num += c
+                    else:
+                        break
+                else:
+                    output.append(RegexLiteral(*source.span(), SingleChar(chr(int(num, 16)), True)))
+                    continue
+                output.append(RegexError(*source.span(), "Incomplete escape"))
+            elif source.next_if_eq("\\"):
+                output.append(RegexLiteral(*source.span(), SingleChar("\\", True)))
         elif char == ")":
             output.append(GenericSpanned(*source.span(), TokenGroupEnd()))
         elif char == "|":
